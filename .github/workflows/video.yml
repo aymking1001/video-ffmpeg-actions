@@ -1,0 +1,41 @@
+name: Video Crop and Scale
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'Video URL'
+        required: true
+
+jobs:
+  process-video:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt update
+          sudo apt install -y ffmpeg
+
+      - name: Download video
+        run: |
+          wget -O input.mp4 "${{ github.event.inputs.video_url }}"
+
+      - name: Crop video (1280x545)
+        run: |
+          ffmpeg -i input.mp4 -vf "crop=1280:545" output_crop.mp4
+
+      - name: Scale video (1280x1080)
+        run: |
+          ffmpeg -i input.mp4 -vf "scale=1280:1080" output_scale.mp4
+
+      - name: Upload result
+        uses: actions/upload-artifact@v3
+        with:
+          name: final-videos
+          path: |
+            output_crop.mp4
+            output_scale.mp4
