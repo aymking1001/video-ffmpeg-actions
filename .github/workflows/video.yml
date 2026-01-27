@@ -44,11 +44,13 @@ jobs:
           echo "$SERVICE_ACCOUNT_JSON" > sa.json
 
           python3 <<'EOF'
-          import json, time, jwt, requests, os
+          import json, time, jwt, requests, os, sys
 
+          # تحميل بيانات service account
           with open("sa.json") as f:
               sa = json.load(f)
 
+          # إنشاء JWT
           now = int(time.time())
           payload = {
               "iss": sa["client_email"],
@@ -60,6 +62,7 @@ jobs:
 
           jwt_token = jwt.encode(payload, sa["private_key"], algorithm="RS256")
 
+          # طلب access token
           token_resp = requests.post(
               sa["token_uri"],
               data={
@@ -68,12 +71,18 @@ jobs:
               },
           )
 
+          if token_resp.status_code != 200:
+              print("Token error:", token_resp.text)
+              sys.exit(1)
+
           access_token = token_resp.json()["access_token"]
 
+          # headers الصحيحة
           headers = {
               "Authorization": f"Bearer {access_token}"
           }
 
+          # metadata
           metadata = {
               "name": os.environ["VIDEO_NAME"],
               "parents": [os.environ["DRIVE_FOLDER_ID"]],
@@ -84,6 +93,7 @@ jobs:
               "file": open("output_final.mp4", "rb"),
           }
 
+          # رفع الملف
           upload = requests.post(
               "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
               headers=headers,
@@ -91,10 +101,16 @@ jobs:
           )
 
           result = upload.json()
+          print("Drive response:", result)
+
           file_id = result.get("id")
+          if not file_id:
+              print("Upload failed")
+              sys.exit(1)
 
           print("Uploaded file ID:", file_id)
 
+          # إخراج الرابط
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"drive_url=https://drive.google.com/file/d/{file_id}/view\n")
           EOF
