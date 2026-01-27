@@ -15,10 +15,10 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg & Curl & JQ
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg
+          sudo apt install -y ffmpeg curl jq
 
       - name: Download video
         run: |
@@ -28,8 +28,10 @@ jobs:
         run: |
           ffmpeg -i input.mp4 -vf "crop=1280:545,scale=1280:1080" output_final.mp4
 
-      - name: Upload result
-        uses: actions/upload-artifact@v4
-        with:
-          name: final-video
-          path: output_final.mp4
+      - name: Upload to Filestack
+        env:
+          FILESTACK_API_KEY: ATOaf6nxQeinMajhgimc7z
+        run: |
+          RESPONSE=$(curl -s -F "file=@output_final.mp4" "https://www.filestackapi.com/api/store/S3?key=$FILESTACK_API_KEY")
+          MP4_URL=$(echo $RESPONSE | jq -r '.url')
+          echo "MP4 URL: $MP4_URL"
