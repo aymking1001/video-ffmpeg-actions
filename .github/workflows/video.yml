@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y ffmpeg python3-pip
-          pip3 install pyjwt requests
+          pip3 install requests
 
       - name: Download video
         run: |
@@ -37,38 +37,29 @@ jobs:
       - name: Upload to Google Drive
         id: upload
         env:
-          SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
           VIDEO_NAME: ${{ github.event.inputs.video_name }}
         run: |
-          echo "$SERVICE_ACCOUNT_JSON" > sa.json
-
           python3 <<'EOF'
-          import json, time, jwt, requests, os, sys
+          import os, requests, json, sys
 
-          # تحميل بيانات service account
-          with open("sa.json") as f:
-              sa = json.load(f)
+          # جلب المتغيرات من Secrets
+          client_id = os.environ["CLIENT_ID"]
+          client_secret = os.environ["CLIENT_SECRET"]
+          refresh_token = os.environ["REFRESH_TOKEN"]
 
-          # إنشاء JWT
-          now = int(time.time())
-          payload = {
-              "iss": sa["client_email"],
-              "scope": "https://www.googleapis.com/auth/drive.file",
-              "aud": sa["token_uri"],
-              "iat": now,
-              "exp": now + 3600,
-          }
-
-          jwt_token = jwt.encode(payload, sa["private_key"], algorithm="RS256")
-
-          # طلب access token
+          # طلب access_token جديد باستخدام refresh_token
           token_resp = requests.post(
-              sa["token_uri"],
+              "https://oauth2.googleapis.com/token",
               data={
-                  "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                  "assertion": jwt_token,
-              },
+                  "client_id": client_id,
+                  "client_secret": client_secret,
+                  "refresh_token": refresh_token,
+                  "grant_type": "refresh_token"
+              }
           )
 
           if token_resp.status_code != 200:
@@ -77,12 +68,10 @@ jobs:
 
           access_token = token_resp.json()["access_token"]
 
-          # headers الصحيحة
           headers = {
               "Authorization": f"Bearer {access_token}"
           }
 
-          # metadata
           metadata = {
               "name": os.environ["VIDEO_NAME"],
               "parents": [os.environ["DRIVE_FOLDER_ID"]],
@@ -93,7 +82,7 @@ jobs:
               "file": open("output_final.mp4", "rb"),
           }
 
-          # رفع الملف
+          # رفع الفيديو إلى Google Drive
           upload = requests.post(
               "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
               headers=headers,
@@ -110,7 +99,7 @@ jobs:
 
           print("Uploaded file ID:", file_id)
 
-          # إخراج الرابط
+          # إخراج الرابط النهائي
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"drive_url=https://drive.google.com/file/d/{file_id}/view\n")
           EOF
