@@ -33,7 +33,7 @@ jobs:
       - name: Upload to Filestack
         id: upload_to_filestack
         env:
-          FILESTACK_API_KEY: ATOaf6nxQeinMajhgimc7z
+          FILESTACK_API_KEY: ATx9lxpGwQJOxSW8OggLAz
         run: |
           RESPONSE=$(curl -s -F "file=@output_final.mp4" "https://www.filestackapi.com/api/store/S3?key=$FILESTACK_API_KEY")
           MP4_URL=$(echo $RESPONSE | jq -r '.url')
