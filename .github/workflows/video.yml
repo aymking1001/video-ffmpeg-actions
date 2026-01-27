@@ -10,6 +10,8 @@ on:
 jobs:
   process-video:
     runs-on: ubuntu-latest
+    outputs:
+      mp4_url: ${{ steps.upload_to_filestack.outputs.mp4_url }}
 
     steps:
       - name: Checkout repo
@@ -28,11 +30,12 @@ jobs:
         run: |
           ffmpeg -i input.mp4 -vf "crop=1280:545,scale=1280:1080" output_final.mp4
 
-      - name: Upload to Filestack and output MP4 URL
+      - name: Upload to Filestack
+        id: upload_to_filestack
         env:
           FILESTACK_API_KEY: ATOaf6nxQeinMajhgimc7z
         run: |
           RESPONSE=$(curl -s -F "file=@output_final.mp4" "https://www.filestackapi.com/api/store/S3?key=$FILESTACK_API_KEY")
           MP4_URL=$(echo $RESPONSE | jq -r '.url')
-          # اطبع الرابط بصيغة JSON ليتم التقاطه بسهولة في n8n
-          echo "{\"mp4_url\":\"$MP4_URL\"}"
+          echo "mp4_url=$MP4_URL" >> $GITHUB_OUTPUT
+
