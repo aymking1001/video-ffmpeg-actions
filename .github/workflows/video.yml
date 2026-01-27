@@ -20,10 +20,11 @@ jobs:
       drive_url: ${{ steps.upload.outputs.drive_url }}
 
     steps:
-      - name: Install FFmpeg
+      - name: Install FFmpeg + Python deps
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg curl jq
+          sudo apt install -y ffmpeg python3-pip
+          pip3 install pyjwt requests
 
       - name: Download video
         run: |
@@ -40,23 +41,60 @@ jobs:
           DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
           VIDEO_NAME: ${{ github.event.inputs.video_name }}
         run: |
-          # إنشاء ملف JSON للمفتاح
           echo "$SERVICE_ACCOUNT_JSON" > sa.json
 
-          # الحصول على access token
-          ACCESS_TOKEN=$(curl -s -X POST -H "Content-Type: application/json" \
-            -d @sa.json \
-            https://oauth2.googleapis.com/token \
-            | jq -r '.access_token')
+          python3 <<'EOF'
+          import json, time, jwt, requests, os
 
-          # رفع الفيديو إلى Google Drive
-          RESPONSE=$(curl -s -X POST \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            -F "metadata={name :'$VIDEO_NAME', parents:['$DRIVE_FOLDER_ID']};type=application/json;charset=UTF-8" \
-            -F "file=@output_final.mp4" \
-            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
+          with open("sa.json") as f:
+              sa = json.load(f)
 
-          DRIVE_FILE_ID=$(echo $RESPONSE | jq -r '.id')
-          echo "Uploaded file ID: $DRIVE_FILE_ID"
-          echo "drive_url=https://drive.google.com/file/d/$DRIVE_FILE_ID/view" >> $GITHUB_OUTPUT
+          now = int(time.time())
+          payload = {
+              "iss": sa["client_email"],
+              "scope": "https://www.googleapis.com/auth/drive.file",
+              "aud": sa["token_uri"],
+              "iat": now,
+              "exp": now + 3600,
+          }
 
+          jwt_token = jwt.encode(payload, sa["private_key"], algorithm="RS256")
+
+          token_resp = requests.post(
+              sa["token_uri"],
+              data={
+                  "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                  "assertion": jwt_token,
+              },
+          )
+
+          access_token = token_resp.json()["access_token"]
+
+          headers = {
+              "Authorization": f"Bearer {access_token}"
+          }
+
+          metadata = {
+              "name": os.environ["VIDEO_NAME"],
+              "parents": [os.environ["DRIVE_FOLDER_ID"]],
+          }
+
+          files = {
+              "metadata": ("metadata", json.dumps(metadata), "application/json"),
+              "file": open("output_final.mp4", "rb"),
+          }
+
+          upload = requests.post(
+              "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+              headers=headers,
+              files=files,
+          )
+
+          result = upload.json()
+          file_id = result.get("id")
+
+          print("Uploaded file ID:", file_id)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"drive_url=https://drive.google.com/file/d/{file_id}/view\n")
+          EOF
