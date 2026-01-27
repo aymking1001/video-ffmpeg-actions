@@ -1,4 +1,4 @@
-name: Video Crop and Scale
+name: Video Crop and Scale to file.io
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
   process-video:
     runs-on: ubuntu-latest
     outputs:
-      mp4_url: ${{ steps.upload_to_streamable.outputs.mp4_url }}
+      mp4_url: ${{ steps.upload_to_fileio.outputs.mp4_url }}
 
     steps:
       - name: Checkout repo
@@ -30,18 +30,10 @@ jobs:
         run: |
           ffmpeg -i input.mp4 -vf "crop=1280:545,scale=1280:1080" output_final.mp4
 
-      - name: Upload to Streamable
-        id: upload_to_streamable
-        env:
-          STREAMABLE_USER: fzerz2534dd@gmail.com
-          STREAMABLE_PASS: sdfSQ@@48646
+      - name: Upload to file.io
+        id: upload_to_fileio
         run: |
-          RESPONSE=$(curl -s -u "$STREAMABLE_USER:$STREAMABLE_PASS" \
-            -F "file=@output_final.mp4" \
-            https://api.streamable.com/upload)
-
-          SHORTCODE=$(echo $RESPONSE | jq -r '.shortcode')
-          MP4_URL="https://cdn.streamable.com/video/mp4/$SHORTCODE.mp4"
-
+          RESPONSE=$(curl -s -F "file=@output_final.mp4" https://file.io?expires=1w)
+          MP4_URL=$(echo $RESPONSE | jq -r '.link')
           echo "mp4_url=$MP4_URL" >> $GITHUB_OUTPUT
           echo "Uploaded MP4 URL: $MP4_URL"
