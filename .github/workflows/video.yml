@@ -11,7 +11,7 @@ jobs:
   process-video:
     runs-on: ubuntu-latest
     outputs:
-      mp4_url: ${{ steps.upload_to_filestack.outputs.mp4_url }}
+      mp4_url: ${{ steps.upload_to_filemirage.outputs.mp4_url }}
 
     steps:
       - name: Checkout repo
@@ -30,12 +30,25 @@ jobs:
         run: |
           ffmpeg -i input.mp4 -vf "crop=1280:545,scale=1280:1080" output_final.mp4
 
-      - name: Upload to Filestack
-        id: upload_to_filestack
+      - name: Upload to FileMirage
+        id: upload_to_filemirage
         env:
-          FILESTACK_API_KEY: ATx9lxpGwQJOxSW8OggLAz
+          FILEMIRAGE_API_TOKEN: QMT8-OPZ7-KUJO-HDK8
         run: |
-          RESPONSE=$(curl -s -F "file=@output_final.mp4" "https://www.filestackapi.com/api/store/S3?key=$FILESTACK_API_KEY")
-          MP4_URL=$(echo $RESPONSE | jq -r '.url')
-          echo "mp4_url=$MP4_URL" >> $GITHUB_OUTPUT
+          # 1️⃣ احصل على السيرفر و upload_id
+          SERVER_DATA=$(curl -s -H "Authorization: Bearer $FILEMIRAGE_API_TOKEN" https://filemirage.com/api/servers)
+          SERVER=$(echo $SERVER_DATA | jq -r '.data.server')
+          UPLOAD_ID=$(echo $SERVER_DATA | jq -r '.data.upload_id')
 
+          # 2️⃣ ارفع الملف (حجمه أقل من 100MB افتراضياً، إذا أكبر يلزم تقسيم chunks)
+          RESPONSE=$(curl -s -F "filename=output_final.mp4" \
+                            -F "upload_id=$UPLOAD_ID" \
+                            -F "chunk_number=0" \
+                            -F "total_chunks=1" \
+                            -F "file=@output_final.mp4" \
+                            "$SERVER/upload.php")
+
+          MP4_URL=$(echo $RESPONSE | jq -r '.data.url')
+
+          echo "mp4_url=$MP4_URL" >> $GITHUB_OUTPUT
+          echo "Uploaded MP4 URL: $MP4_URL"
