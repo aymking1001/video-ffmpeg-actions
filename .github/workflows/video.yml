@@ -1,4 +1,4 @@
-name: Video Crop and Scale to file.io
+name: Video Crop and Upload to Gofile
 
 on:
   workflow_dispatch:
@@ -11,13 +11,10 @@ jobs:
   process-video:
     runs-on: ubuntu-latest
     outputs:
-      mp4_url: ${{ steps.upload_to_fileio.outputs.mp4_url }}
+      mp4_url: ${{ steps.direct_link.outputs.mp4_url }}
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install FFmpeg, Curl, JQ
+      - name: Install FFmpeg & tools
         run: |
           sudo apt update
           sudo apt install -y ffmpeg curl jq
@@ -26,14 +23,21 @@ jobs:
         run: |
           wget -O input.mp4 "${{ github.event.inputs.video_url }}"
 
-      - name: Remove top & bottom then stretch (Final Video)
+      - name: Crop & scale
         run: |
           ffmpeg -i input.mp4 -vf "crop=1280:545,scale=1280:1080" output_final.mp4
 
-      - name: Upload to file.io
-        id: upload_to_fileio
+      - name: Upload to Gofile
+        id: upload
+        env:
+          GOFILE_TOKEN: ${{ secrets.GOFILE_TOKEN }}
         run: |
-          RESPONSE=$(curl -s -F "file=@output_final.mp4" https://file.io?expires=1w)
-          MP4_URL=$(echo $RESPONSE | jq -r '.link')
-          echo "mp4_url=$MP4_URL" >> $GITHUB_OUTPUT
-          echo "Uploaded MP4 URL: $MP4_URL"
+          RESPONSE=$(curl -s \
+            -H "Authorization: Bearer $GOFILE_TOKEN" \
+            -F "file=@output_final.mp4" \
+            https://upload.gofile.io/uploadfile)
+
+          echo "$RESPONSE"
+
+          CONTENT_ID=$(echo $RESPONSE | jq -r '.data.fileId')
+          echo "content_id=$CONTENT_ID" >> $GITHUB_OUTPUT
