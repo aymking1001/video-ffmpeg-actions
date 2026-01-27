@@ -1,4 +1,4 @@
-name: Video Crop and Upload to Gofile
+name: Video Crop + Upload to Catbox
 
 on:
   workflow_dispatch:
@@ -11,33 +11,30 @@ jobs:
   process-video:
     runs-on: ubuntu-latest
     outputs:
-      mp4_url: ${{ steps.direct_link.outputs.mp4_url }}
+      mp4_url: ${{ steps.upload.outputs.mp4_url }}
 
     steps:
-      - name: Install FFmpeg & tools
+      - name: Install FFmpeg
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg curl jq
+          sudo apt install -y ffmpeg curl
 
       - name: Download video
         run: |
           wget -O input.mp4 "${{ github.event.inputs.video_url }}"
 
-      - name: Crop & scale
+      - name: Crop top & bottom then scale
         run: |
           ffmpeg -i input.mp4 -vf "crop=1280:545,scale=1280:1080" output_final.mp4
 
-      - name: Upload to Gofile
+      - name: Upload to Catbox
         id: upload
-        env:
-          GOFILE_TOKEN: ${{ secrets.GOFILE_TOKEN }}
         run: |
           RESPONSE=$(curl -s \
-            -H "Authorization: Bearer $GOFILE_TOKEN" \
-            -F "file=@output_final.mp4" \
-            https://upload.gofile.io/uploadfile)
+            -F "reqtype=fileupload" \
+            -F "userhash=11b860605a107d32f897f569a" \
+            -F "fileToUpload=@output_final.mp4" \
+            https://catbox.moe/user/api.php)
 
-          echo "$RESPONSE"
-
-          CONTENT_ID=$(echo $RESPONSE | jq -r '.data.fileId')
-          echo "content_id=$CONTENT_ID" >> $GITHUB_OUTPUT
+          echo "MP4 URL: $RESPONSE"
+          echo "mp4_url=$RESPONSE" >> $GITHUB_OUTPUT
