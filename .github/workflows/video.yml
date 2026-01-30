@@ -1,4 +1,4 @@
-name: Video Crop + Waveform + Upload to Google Drive
+name: Crop, Scale & Add Waveform + Upload to Google Drive
 
 on:
   workflow_dispatch:
@@ -18,23 +18,20 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       drive_url: ${{ steps.upload.outputs.drive_url }}
-      videoFileId: ${{ steps.upload.outputs.videoFileId }}
 
     steps:
-      - name: Install Dependencies
+      - name: Install FFmpeg + Python deps
         run: |
           sudo apt update
           sudo apt install -y wget python3-pip
           pip3 install requests
+          # تحميل FFmpeg 7.0.2 الثابت
+          wget -O ffmpeg.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          tar -xf ffmpeg.tar.xz
+          mv ffmpeg-*-amd64-static ffmpeg
+          chmod +x ./ffmpeg/ffmpeg
 
-      - name: Download FFmpeg 7.0.2 static
-        run: |
-          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
-          tar -xf ffmpeg-release-amd64-static.tar.xz
-          mv ffmpeg-7.0.2-amd64-static ffmpeg
-          chmod +x ffmpeg/ffmpeg
-
-      - name: Download Video
+      - name: Download video
         run: |
           wget -O input.mp4 "${{ github.event.inputs.video_url }}"
 
@@ -42,7 +39,7 @@ jobs:
         run: |
           ./ffmpeg/ffmpeg -i input.mp4 -filter_complex "
             [0:v]crop=1280:545,scale=1280:1080,setsar=1[v];
-            [0:a]showwaves=s=1280x200:mode=bar:colors=white@0.8[wave];
+            [0:a]aformat=channel_layouts=mono,showwaves=s=1280x200:mode=cline:colors=white@0.8[wave];
             [v][wave]overlay=(W-w)/2:H-h-50
           " -c:a aac -c:v libx264 -crf 23 output_final.mp4
 
@@ -64,7 +61,7 @@ jobs:
           folder_id = os.environ["DRIVE_FOLDER_ID"]
           video_name = os.environ["VIDEO_NAME"]
 
-          # Get access token
+          # طلب access_token جديد باستخدام refresh_token
           token_resp = requests.post(
               "https://oauth2.googleapis.com/token",
               data={
@@ -77,50 +74,35 @@ jobs:
           if token_resp.status_code != 200:
               print("Token error:", token_resp.text)
               sys.exit(1)
-
           access_token = token_resp.json()["access_token"]
           headers = {"Authorization": f"Bearer {access_token}"}
 
-          # Delete existing files with same name
-          search_url = (
-              "https://www.googleapis.com/drive/v3/files"
-              f"?q=name='{video_name}' and '{folder_id}' in parents"
-              "&fields=files(id,name)"
-          )
+          # حذف أي ملف بنفس الاسم في المجلد
+          search_url = f"https://www.googleapis.com/drive/v3/files?q=name='{video_name}' and '{folder_id}' in parents&fields=files(id,name)"
           resp = requests.get(search_url, headers=headers)
           if resp.status_code == 200:
               for f in resp.json().get("files", []):
-                  requests.delete(
-                      f"https://www.googleapis.com/drive/v3/files/{f['id']}",
-                      headers=headers
-                  )
+                  requests.delete(f"https://www.googleapis.com/drive/v3/files/{f['id']}", headers=headers)
 
-          # Upload new video
-          metadata = {
-              "name": video_name,
-              "parents": [folder_id]
-          }
-
+          # رفع الفيديو الجديد
+          metadata = {"name": video_name, "parents": [folder_id]}
           files = {
               "metadata": ("metadata", json.dumps(metadata), "application/json"),
               "file": open("output_final.mp4", "rb")
           }
-
           upload = requests.post(
               "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
               headers=headers,
               files=files
           )
-
           result = upload.json()
           file_id = result.get("id")
-
           if not file_id:
               print("Upload failed:", result)
               sys.exit(1)
 
-          # Export outputs
+          # إخراج رابط الفيديو النهائي و videoFileId
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"videoFileId={file_id}\n")
               f.write(f"drive_url=https://drive.google.com/file/d/{file_id}/view\n")
+              f.write(f"videoFileId={file_id}\n")
           EOF
