@@ -1,4 +1,4 @@
-name: Video Crop + Audio Wave + Upload to Google Drive
+name: Video Crop + Waveform + Upload to Google Drive
 
 on:
   workflow_dispatch:
@@ -21,31 +21,30 @@ jobs:
       videoFileId: ${{ steps.upload.outputs.videoFileId }}
 
     steps:
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           sudo apt update
           sudo apt install -y wget python3-pip
           pip3 install requests
 
-      - name: Download FFmpeg static
+      - name: Download FFmpeg 7.0.2 static
         run: |
-          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz
-          tar -xf ffmpeg-7.0.2-amd64-static.tar.xz
-          FF_BIN=$(find ./ffmpeg-7.0.2-amd64-static -type f -name ffmpeg | head -n1)
-          echo "$(dirname $FF_BIN)" >> $GITHUB_PATH
-          export PATH="$(dirname $FF_BIN):$PATH"
+          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          tar -xf ffmpeg-release-amd64-static.tar.xz
+          mv ffmpeg-7.0.2-amd64-static ffmpeg
+          chmod +x ffmpeg/ffmpeg
 
-      - name: Download video
+      - name: Download Video
         run: |
           wget -O input.mp4 "${{ github.event.inputs.video_url }}"
 
-      - name: Crop top & bottom, scale, add audio waveform
+      - name: Crop, Scale & Add Waveform
         run: |
-          ffmpeg -i input.mp4 -filter_complex "
+          ./ffmpeg/ffmpeg -i input.mp4 -filter_complex "
             [0:v]crop=1280:545,scale=1280:1080,setsar=1[v];
-            [0:a]showwaves=s=1200x200:mode=line:rate=25:colors=white@0.9[audio_wave];
-            [v][audio_wave]overlay=(W-w)/2:H-h-50:shortest=1
-          " -map "[v]" -map 0:a -c:v libx264 -crf 23 -preset veryfast -c:a aac -b:a 128k output_final.mp4
+            [0:a]showwaves=s=1280x200:mode=bar:colors=white@0.8[wave];
+            [v][wave]overlay=(W-w)/2:H-h-50
+          " -c:a aac -c:v libx264 -crf 23 output_final.mp4
 
       - name: Upload to Google Drive
         id: upload
@@ -75,7 +74,6 @@ jobs:
                   "grant_type": "refresh_token"
               }
           )
-
           if token_resp.status_code != 200:
               print("Token error:", token_resp.text)
               sys.exit(1)
