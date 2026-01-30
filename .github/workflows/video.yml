@@ -17,6 +17,7 @@ jobs:
   process-video:
     runs-on: ubuntu-latest
     outputs:
+      videoFileId: ${{ steps.upload.outputs.videoFileId }}
       drive_url: ${{ steps.upload.outputs.drive_url }}
 
     steps:
@@ -33,8 +34,8 @@ jobs:
       - name: Crop + Scale + Add Audio Waveform (center, transparent)
         run: |
           ffmpeg -i input.mp4 -filter_complex "
-          [0:v]crop=1280:545,scale=1280:1080[v];
-          [0:a]showwaves=s=800x200:mode=line:colors=white@0.9:scale=sqrt[wave];
+          [0:v]crop=1280:545,scale=1280:1080,setsar=1[v];
+          [0:a]showwaves=s=900x260:mode=line:colors=cyan@1.0:scale=sqrt:draw=full[wave];
           [v][wave]overlay=(W-w)/2:(H-h)/2
           " -map 0:a -c:v libx264 -pix_fmt yuv420p -movflags +faststart output_final.mp4
 
@@ -75,7 +76,11 @@ jobs:
           headers = {"Authorization": f"Bearer {access_token}"}
 
           # Delete existing files with same name
-          search_url = f"https://www.googleapis.com/drive/v3/files?q=name='{video_name}' and '{folder_id}' in parents&fields=files(id,name)"
+          search_url = (
+              "https://www.googleapis.com/drive/v3/files"
+              f"?q=name='{video_name}' and '{folder_id}' in parents"
+              "&fields=files(id,name)"
+          )
           resp = requests.get(search_url, headers=headers)
           if resp.status_code == 200:
               for f in resp.json().get("files", []):
@@ -108,6 +113,8 @@ jobs:
               print("Upload failed:", result)
               sys.exit(1)
 
+          # Export outputs
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"videoFileId={file_id}\n")
               f.write(f"drive_url=https://drive.google.com/file/d/{file_id}/view\n")
           EOF
