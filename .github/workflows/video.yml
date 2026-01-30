@@ -1,4 +1,4 @@
-name: Video Crop + Waveform + Upload to Google Drive
+name: Crop + Scale + Vertical Waveform + Upload to Google Drive
 
 on:
   workflow_dispatch:
@@ -18,28 +18,27 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       drive_url: ${{ steps.upload.outputs.drive_url }}
-      videoFileId: ${{ steps.upload.outputs.videoFileId }}
 
     steps:
       - name: Install FFmpeg + Python deps
         run: |
           sudo apt update
-          sudo apt install -y wget python3-pip
+          sudo apt install -y wget
+          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          tar -xf ffmpeg-release-amd64-static.tar.xz
+          mv ffmpeg-*-amd64-static ./ffmpeg
+          sudo apt install -y python3-pip
           pip3 install requests
-          # تنزيل نسخة حديثة من FFmpeg
-          wget -O ffmpeg-release.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
-          tar -xvf ffmpeg-release.tar.xz
-          export PATH="$PWD/ffmpeg-*-amd64-static:$PATH"
 
       - name: Download video
         run: |
           wget -O input.mp4 "${{ github.event.inputs.video_url }}"
 
-      - name: Crop, Scale & Add Waveform
+      - name: Crop, Scale & Add Vertical Waveform
         run: |
-          ./ffmpeg-*-amd64-static/ffmpeg -i input.mp4 -filter_complex "
+          ./ffmpeg/ffmpeg -i input.mp4 -filter_complex "
             [0:v]crop=1280:545,scale=1280:1080,setsar=1[v];
-            [0:a]aformat=channel_layouts=mono,showwaves=s=1280x400:mode=line:colors=white@1.0:scale=lin[wave];
+            [0:a]aformat=channel_layouts=mono,showwaves=s=1280x400:mode=line:colors=white@1.0,transpose=2[wave];
             [v][wave]overlay=(W-w)/2:H-h-50
           " -c:a aac -c:v libx264 -crf 23 output_final.mp4
 
@@ -71,6 +70,7 @@ jobs:
                   "grant_type": "refresh_token"
               }
           )
+
           if token_resp.status_code != 200:
               print("Token error:", token_resp.text)
               sys.exit(1)
@@ -82,28 +82,43 @@ jobs:
           search_url = f"https://www.googleapis.com/drive/v3/files?q=name='{video_name}' and '{folder_id}' in parents&fields=files(id,name)"
           resp = requests.get(search_url, headers=headers)
           if resp.status_code == 200:
-              for f in resp.json().get("files", []):
-                  requests.delete(f"https://www.googleapis.com/drive/v3/files/{f['id']}", headers=headers)
+              files = resp.json().get("files", [])
+              for f in files:
+                  delete_url = f"https://www.googleapis.com/drive/v3/files/{f['id']}"
+                  del_resp = requests.delete(delete_url, headers=headers)
+                  if del_resp.status_code in [204, 200]:
+                      print(f"Deleted existing file: {f['name']}")
+                  else:
+                      print(f"Failed to delete {f['name']}: {del_resp.text}")
+          else:
+              print("Search failed:", resp.text)
 
           # رفع الفيديو الجديد
-          metadata = {"name": video_name, "parents": [folder_id]}
+          metadata = {
+              "name": video_name,
+              "parents": [folder_id],
+          }
+
           files = {
               "metadata": ("metadata", json.dumps(metadata), "application/json"),
               "file": open("output_final.mp4", "rb"),
           }
+
           upload = requests.post(
               "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
               headers=headers,
               files=files,
           )
+
           result = upload.json()
+          print("Drive response:", result)
+
           file_id = result.get("id")
           if not file_id:
-              print("Upload failed:", result)
+              print("Upload failed")
               sys.exit(1)
 
-          # إخراج مخرجات GitHub Actions
+          # إخراج رابط الفيديو النهائي
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"videoFileId={file_id}\n")
               f.write(f"drive_url=https://drive.google.com/file/d/{file_id}/view\n")
           EOF
