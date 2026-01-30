@@ -21,21 +21,30 @@ jobs:
       videoFileId: ${{ steps.upload.outputs.videoFileId }}
 
     steps:
-      - name: Install FFmpeg + Python deps
+      - name: Install FFmpeg latest + Python deps
         run: |
-          sudo apt update
-          sudo apt install -y ffmpeg python3-pip
+          sudo apt-get update
+          sudo apt-get install -y wget tar python3-pip
           pip3 install requests
+
+          # Download FFmpeg static build
+          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          tar -xvf ffmpeg-release-amd64-static.tar.xz
+          FF_DIR=$(find . -type d -name "ffmpeg-*-static" | head -n 1)
+          echo "Using FFmpeg from $FF_DIR"
+          echo "$FF_DIR" >> $GITHUB_PATH  # يضيفها للـ PATH
+
+          ffmpeg -version
 
       - name: Download video
         run: |
           wget -O input.mp4 "${{ github.event.inputs.video_url }}"
 
-      - name: Crop top & bottom, scale, add audio bars
+      - name: Crop & scale video + add audio bars
         run: |
           ffmpeg -i input.mp4 -filter_complex "
             [0:v]crop=1280:545,scale=1280:1080,setsar=1[v];
-            [0:a]showspectrum=mode=separate:color=intensity:slide=1:s=1280x160[wave];
+            [0:a]showwaves=s=1280x160:mode=bar:colors=white@0.9[wave];
             [v][wave]overlay=(W-w)/2:H-h-160
           " -map 0:a -c:v libx264 -pix_fmt yuv420p -movflags +faststart output_final.mp4
 
@@ -79,15 +88,22 @@ jobs:
           search_url = f"https://www.googleapis.com/drive/v3/files?q=name='{video_name}' and '{folder_id}' in parents&fields=files(id,name)"
           resp = requests.get(search_url, headers=headers)
           if resp.status_code == 200:
-              files = resp.json().get("files", [])
-              for f in files:
+              for f in resp.json().get("files", []):
                   delete_url = f"https://www.googleapis.com/drive/v3/files/{f['id']}"
                   del_resp = requests.delete(delete_url, headers=headers)
+                  if del_resp.status_code in [204, 200]:
+                      print(f"Deleted existing file: {f['name']}")
+                  else:
+                      print(f"Failed to delete {f['name']}: {del_resp.text}")
           else:
               print("Search failed:", resp.text)
 
           # رفع الفيديو الجديد
-          metadata = {"name": video_name, "parents": [folder_id]}
+          metadata = {
+              "name": video_name,
+              "parents": [folder_id],
+          }
+
           files = {
               "metadata": ("metadata", json.dumps(metadata), "application/json"),
               "file": open("output_final.mp4", "rb"),
@@ -100,12 +116,14 @@ jobs:
           )
 
           result = upload.json()
+          print("Drive response:", result)
+
           file_id = result.get("id")
           if not file_id:
-              print("Upload failed:", result)
+              print("Upload failed")
               sys.exit(1)
 
-          # إخراج المخرجات
+          # إخراج الرابط و videoFileId
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"drive_url=https://drive.google.com/file/d/{file_id}/view\n")
               f.write(f"videoFileId={file_id}\n")
