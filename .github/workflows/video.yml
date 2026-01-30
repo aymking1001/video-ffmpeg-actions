@@ -1,4 +1,4 @@
-name: Crop + Scale + Vertical Waveform + Upload to Google Drive
+name: Video Crop + Audio Waves + Upload to Google Drive
 
 on:
   workflow_dispatch:
@@ -23,24 +23,20 @@ jobs:
       - name: Install FFmpeg + Python deps
         run: |
           sudo apt update
-          sudo apt install -y wget
-          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
-          tar -xf ffmpeg-release-amd64-static.tar.xz
-          mv ffmpeg-*-amd64-static ./ffmpeg
-          sudo apt install -y python3-pip
+          sudo apt install -y ffmpeg python3-pip
           pip3 install requests
 
       - name: Download video
         run: |
           wget -O input.mp4 "${{ github.event.inputs.video_url }}"
 
-      - name: Crop, Scale & Add Vertical Waveform
+      - name: Crop top & bottom, scale and add audio waveform
         run: |
-          ./ffmpeg/ffmpeg -i input.mp4 -filter_complex "
+          ffmpeg -i input.mp4 -filter_complex "
             [0:v]crop=1280:545,scale=1280:1080,setsar=1[v];
-            [0:a]aformat=channel_layouts=mono,showwaves=s=1280x400:mode=line:colors=white@1.0,transpose=2[wave];
+            [0:a]compand,showwaves=size=1280x200:colors=white:draw=full:mode=p2p,format=yuv420p[wave];
             [v][wave]overlay=(W-w)/2:H-h-50
-          " -c:a aac -c:v libx264 -crf 23 output_final.mp4
+          " -map "[v]" -map 0:a -c:v libx264 -c:a copy output_final.mp4
 
       - name: Upload to Google Drive
         id: upload
