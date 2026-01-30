@@ -28,9 +28,9 @@ jobs:
 
       - name: Download FFmpeg 7 static
         run: |
-          wget -O ffmpeg-7.0.2-amd64-static.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz
+          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz
           tar -xf ffmpeg-7.0.2-amd64-static.tar.xz
-          chmod +x ./ffmpeg-7.0.2-amd64-static/ffmpeg
+          chmod +x ffmpeg-7.0.2-amd64-static/ffmpeg
 
       - name: Download video
         run: |
@@ -40,11 +40,11 @@ jobs:
         run: |
           ./ffmpeg-7.0.2-amd64-static/ffmpeg -i input.mp4 -vf "crop=in_w:545,scale=1280:720,setsar=1" output_cropped.mp4
 
-      - name: Add waveform overlay
+      - name: Add waveform starting at 21s
         run: |
           ./ffmpeg-7.0.2-amd64-static/ffmpeg -i output_cropped.mp4 -filter_complex "\
           [0:a]compand,showwaves=s=629x8:colors=white@1:draw=full:mode=p2p,format=yuva420p[wave]; \
-          [0:v][wave]overlay=x=541:y=616:format=auto,format=yuv420p[outv]" \
+          [0:v][wave]overlay=x=541:y=616:format=auto:enable='gte(t,21)',format=yuv420p[outv]" \
           -map "[outv]" -map 0:a -c:v libx264 -c:a copy output_final.mp4
 
       - name: Upload to Google Drive
@@ -65,7 +65,6 @@ jobs:
           folder_id = os.environ["DRIVE_FOLDER_ID"]
           video_name = os.environ["VIDEO_NAME"]
 
-          # طلب access_token جديد باستخدام refresh_token
           token_resp = requests.post(
               "https://oauth2.googleapis.com/token",
               data={
@@ -83,7 +82,6 @@ jobs:
           access_token = token_resp.json()["access_token"]
           headers = {"Authorization": f"Bearer {access_token}"}
 
-          # البحث عن أي ملف بنفس الاسم في المجلد المحدد وحذفه
           search_url = f"https://www.googleapis.com/drive/v3/files?q=name='{video_name}' and '{folder_id}' in parents&fields=files(id,name)"
           resp = requests.get(search_url, headers=headers)
           if resp.status_code == 200:
@@ -98,7 +96,6 @@ jobs:
           else:
               print("Search failed:", resp.text)
 
-          # رفع الفيديو الجديد
           metadata = {
               "name": video_name,
               "parents": [folder_id],
@@ -123,7 +120,6 @@ jobs:
               print("Upload failed")
               sys.exit(1)
 
-          # إخراج رابط الفيديو النهائي
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"drive_url=https://drive.google.com/file/d/{file_id}/view\n")
           EOF
