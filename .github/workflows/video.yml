@@ -20,17 +20,17 @@ jobs:
       drive_url: ${{ steps.upload.outputs.drive_url }}
 
     steps:
-      - name: Install Python deps
+      - name: Install FFmpeg + Python deps
         run: |
           sudo apt update
-          sudo apt install -y python3-pip wget xz-utils
+          sudo apt install -y wget python3-pip
           pip3 install requests
 
       - name: Download FFmpeg 7 static
         run: |
-          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz
+          wget -O ffmpeg-7.0.2-amd64-static.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz
           tar -xf ffmpeg-7.0.2-amd64-static.tar.xz
-          chmod +x ffmpeg-7.0.2-amd64-static/ffmpeg
+          chmod +x ./ffmpeg-7.0.2-amd64-static/ffmpeg
 
       - name: Download video
         run: |
@@ -40,11 +40,11 @@ jobs:
         run: |
           ./ffmpeg-7.0.2-amd64-static/ffmpeg -i input.mp4 -vf "crop=in_w:545,scale=1280:720,setsar=1" output_cropped.mp4
 
-      - name: Add waveform overlay (transparent background)
+      - name: Add waveform overlay
         run: |
           ./ffmpeg-7.0.2-amd64-static/ffmpeg -i output_cropped.mp4 -filter_complex "\
-          [0:a]compand,showwaves=s=1280x200:colors=white@0.8:draw=full:mode=p2p,format=yuva420p[wave]; \
-          [0:v][wave]overlay=(W-w)/2:H-h-50:format=auto,format=yuv420p[outv]" \
+          [0:a]compand,showwaves=s=629x8:colors=white@1:draw=full:mode=p2p,format=yuva420p[wave]; \
+          [0:v][wave]overlay=x=541:y=616:format=auto,format=yuv420p[outv]" \
           -map "[outv]" -map 0:a -c:v libx264 -c:a copy output_final.mp4
 
       - name: Upload to Google Drive
