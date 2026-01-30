@@ -23,7 +23,7 @@ jobs:
       - name: Install Python deps
         run: |
           sudo apt update
-          sudo apt install -y python3-pip
+          sudo apt install -y python3-pip wget
           pip3 install requests
 
       - name: Download video
@@ -37,7 +37,11 @@ jobs:
 
       - name: Crop, Scale & Add Transparent Waveform
         run: |
-          ./ffmpeg-7.0.2-amd64-static/ffmpeg -i input.mp4 -filter_complex "[0:v]crop=1280:545,scale=1280:1080,setsar=1[v0];[0:a]compand,showwaves=size=1280x200:colors=white:draw=full:mode=p2p,format=yuva420p[wave];[v0][wave]overlay=(W-w)/2:H-h-50:shortest=1[vout]" -map "[vout]" -map 0:a -c:v libx264 -c:a copy output_final.mp4
+          ./ffmpeg-7.0.2-amd64-static/ffmpeg -i input.mp4 -filter_complex "
+          [0:v]crop=1280:545,scale=1280:1080,setsar=1[v0];
+          [0:a]compand,showwaves=size=1280x200:colors=white:draw=full:mode=p2p,format=yuva420p[wave];
+          [v0][wave]overlay=(W-w)/2:H-h-50:shortest=1[vout]" \
+          -map "[vout]" -map 0:a -c:v libx264 -c:a copy output_final.mp4
 
       - name: Upload to Google Drive
         id: upload
