@@ -1,4 +1,4 @@
-name: Video Crop + Upload to Google Drive
+name: Video Crop + Waveform + Upload to Google Drive
 
 on:
   workflow_dispatch:
@@ -23,16 +23,23 @@ jobs:
       - name: Install FFmpeg + Python deps
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg python3-pip
+          sudo apt install -y wget python3-pip
           pip3 install requests
 
       - name: Download video
         run: |
           wget -O input.mp4 "${{ github.event.inputs.video_url }}"
 
-      - name: Crop top & bottom then scale
+      - name: Crop top & bottom then scale to 16:9
         run: |
-          ffmpeg -i input.mp4 -vf "crop=1280:545,scale=1280:1080" output_final.mp4
+          ./ffmpeg-7.0.2-amd64-static/ffmpeg -i input.mp4 -vf "crop=in_w:545,scale=1280:720,setsar=1" output_cropped.mp4
+
+      - name: Add Transparent Waveform
+        run: |
+          ./ffmpeg-7.0.2-amd64-static/ffmpeg -i output_cropped.mp4 -filter_complex "
+          [0:a]compand,showwaves=size=1280x200:colors=white:draw=full:mode=p2p,format=yuva420p[wave];
+          [0:v][wave]overlay=(W-w)/2:H-h-50:shortest=1[vout]" \
+          -map "[vout]" -map 0:a -c:v libx264 -c:a copy output_final.mp4
 
       - name: Upload to Google Drive
         id: upload
@@ -114,4 +121,3 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"drive_url=https://drive.google.com/file/d/{file_id}/view\n")
           EOF
-        
