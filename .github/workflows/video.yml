@@ -20,27 +20,27 @@ jobs:
       drive_url: ${{ steps.upload.outputs.drive_url }}
 
     steps:
-      - name: Install Python deps
+      - name: Download FFmpeg 7
         run: |
-          sudo apt update
-          sudo apt install -y python3-pip wget
-          pip3 install requests
+          wget -O ffmpeg-7.0.2-amd64-static.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz
+          tar -xf ffmpeg-7.0.2-amd64-static.tar.xz
+
+      - name: Install Python deps
+        run: pip3 install requests
 
       - name: Download video
         run: |
           wget -O input.mp4 "${{ github.event.inputs.video_url }}"
 
-      - name: Download FFmpeg 7 Static
+      - name: Crop top & bottom then scale
         run: |
-          wget -O ffmpeg-7.0.2-amd64-static.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz
-          tar -xf ffmpeg-7.0.2-amd64-static.tar.xz
+          ./ffmpeg-7.0.2-amd64-static/ffmpeg -i input.mp4 -vf "crop=1280:545,scale=1280:1080,setsar=1" output_cropped.mp4
 
-      - name: Crop, Scale & Add Transparent Waveform
+      - name: Add Transparent Waveform
         run: |
-          ./ffmpeg-7.0.2-amd64-static/ffmpeg -i input.mp4 -filter_complex "
-          [0:v]crop=1280:545,scale=1280:1080,setsar=1[v0];
+          ./ffmpeg-7.0.2-amd64-static/ffmpeg -i output_cropped.mp4 -filter_complex "
           [0:a]compand,showwaves=size=1280x200:colors=white:draw=full:mode=p2p,format=yuva420p[wave];
-          [v0][wave]overlay=(W-w)/2:H-h-50:shortest=1[vout]" \
+          [0:v][wave]overlay=(W-w)/2:H-h-50:shortest=1[vout]" \
           -map "[vout]" -map 0:a -c:v libx264 -c:a copy output_final.mp4
 
       - name: Upload to Google Drive
@@ -61,7 +61,7 @@ jobs:
           folder_id = os.environ["DRIVE_FOLDER_ID"]
           video_name = os.environ["VIDEO_NAME"]
 
-          # طلب access_token جديد
+          # طلب access_token جديد باستخدام refresh_token
           token_resp = requests.post(
               "https://oauth2.googleapis.com/token",
               data={
@@ -71,6 +71,7 @@ jobs:
                   "grant_type": "refresh_token"
               }
           )
+
           if token_resp.status_code != 200:
               print("Token error:", token_resp.text)
               sys.exit(1)
@@ -78,21 +79,38 @@ jobs:
           access_token = token_resp.json()["access_token"]
           headers = {"Authorization": f"Bearer {access_token}"}
 
-          # حذف أي ملف بنفس الاسم في المجلد
+          # البحث عن أي ملف بنفس الاسم في المجلد المحدد وحذفه
           search_url = f"https://www.googleapis.com/drive/v3/files?q=name='{video_name}' and '{folder_id}' in parents&fields=files(id,name)"
           resp = requests.get(search_url, headers=headers)
           if resp.status_code == 200:
-              for f in resp.json().get("files", []):
-                  del_resp = requests.delete(f"https://www.googleapis.com/drive/v3/files/{f['id']}", headers=headers)
+              files = resp.json().get("files", [])
+              for f in files:
+                  delete_url = f"https://www.googleapis.com/drive/v3/files/{f['id']}"
+                  del_resp = requests.delete(delete_url, headers=headers)
                   if del_resp.status_code in [204, 200]:
                       print(f"Deleted existing file: {f['name']}")
+                  else:
+                      print(f"Failed to delete {f['name']}: {del_resp.text}")
           else:
               print("Search failed:", resp.text)
 
           # رفع الفيديو الجديد
-          metadata = {"name": video_name, "parents": [folder_id]}
-          files = {"metadata": ("metadata", json.dumps(metadata), "application/json"), "file": open("output_final.mp4", "rb")}
-          upload = requests.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", headers=headers, files=files)
+          metadata = {
+              "name": video_name,
+              "parents": [folder_id],
+          }
+
+          files = {
+              "metadata": ("metadata", json.dumps(metadata), "application/json"),
+              "file": open("output_final.mp4", "rb"),
+          }
+
+          upload = requests.post(
+              "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+              headers=headers,
+              files=files,
+          )
+
           result = upload.json()
           print("Drive response:", result)
 
