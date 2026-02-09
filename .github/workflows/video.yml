@@ -40,11 +40,11 @@ jobs:
         run: |
           ./ffmpeg-7.0.2-amd64-static/ffmpeg -i input.mp4 -vf "crop=in_w:545,scale=1280:720,setsar=1" output_cropped.mp4
 
-      - name: Add waveform starting at 7s
+      - name: Add waveform starting at 13s
         run: |
           ./ffmpeg-7.0.2-amd64-static/ffmpeg -i output_cropped.mp4 -filter_complex "\
           [0:a]compand,showwaves=s=629x8:colors=white@1:draw=full:mode=p2p,format=yuva420p[wave]; \
-          [0:v][wave]overlay=x=541:y=616:format=auto:enable='gte(t,7)',format=yuv420p[outv]" \
+          [0:v][wave]overlay=x=541:y=616:format=auto:enable='gte(t,13)',format=yuv420p[outv]" \
           -map "[outv]" -map 0:a -c:v libx264 -c:a copy output_final.mp4
 
       - name: Upload to Google Drive
