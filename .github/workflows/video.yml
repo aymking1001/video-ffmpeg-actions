@@ -1,30 +1,136 @@
 ```yaml
+name: Video Crop + Waveform + Upload to Google Drive
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'Video URL'
+        required: true
+      drive_folder_id:
+        description: 'Google Drive folder ID to upload video'
+        required: true
+      video_name:
+        description: 'Name for the uploaded video'
+        required: true
+
+jobs:
+  process-video:
+    runs-on: ubuntu-latest
+
+    outputs:
+      drive_url: ${{ steps.upload.outputs.drive_url }}
+      video_file_id: ${{ steps.upload.outputs.video_file_id }}
+
+    steps:
+
+      # ==========================================
+      # Install FFmpeg + Python dependencies
+      # ==========================================
+
+      - name: Install FFmpeg + Python deps
+        run: |
+          sudo apt update
+          sudo apt install -y wget python3-pip
+          pip3 install requests
+
+
+      # ==========================================
+      # Download FFmpeg
+      # ==========================================
+
+      - name: Download FFmpeg 7 static
+        run: |
+          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz
+          tar -xf ffmpeg-7.0.2-amd64-static.tar.xz
+          chmod +x ffmpeg-7.0.2-amd64-static/ffmpeg
+
+
+      # ==========================================
+      # Download video
+      # ==========================================
+
+      - name: Download video
+        run: |
+          wget -O input.mp4 "${{ github.event.inputs.video_url }}"
+
+
+      # ==========================================
+      # Crop top & bottom then scale
+      # ==========================================
+
+      - name: Crop top & bottom then scale
+        run: |
+          ./ffmpeg-7.0.2-amd64-static/ffmpeg \
+            -i input.mp4 \
+            -vf "crop=in_w:545,scale=1280:720,setsar=1" \
+            output_cropped.mp4
+
+
+      # ==========================================
+      # Add waveform starting at 13 seconds
+      # ==========================================
+
+      - name: Add waveform starting at 13s
+        run: |
+          ./ffmpeg-7.0.2-amd64-static/ffmpeg \
+            -i output_cropped.mp4 \
+            -filter_complex "\
+            [0:a]compand,showwaves=s=629x8:colors=white@1:draw=full:mode=p2p,format=yuva420p[wave]; \
+            [0:v][wave]overlay=x=541:y=616:format=auto:enable='gte(t,13)',format=yuv420p[outv]" \
+            -map "[outv]" \
+            -map 0:a \
+            -c:v libx264 \
+            -c:a copy \
+            output_final.mp4
+
+
+      # ==========================================
+      # Upload to Google Drive
+      # ==========================================
+
       - name: Upload to Google Drive
         id: upload
+
         env:
           CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+
           DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
           VIDEO_NAME: ${{ github.event.inputs.video_name }}
+
           N8N_WEBHOOK_URL: https://n8n-2tgd.onrender.com/webhook/35833a97-aa94-4207-90cc-479bc5c31a71
+
         run: |
+
           python3 <<'EOF'
+
           import os
           import requests
           import json
           import sys
 
+
+          # ==========================================
+          # Environment variables
+          # ==========================================
+
           client_id = os.environ["CLIENT_ID"]
           client_secret = os.environ["CLIENT_SECRET"]
           refresh_token = os.environ["REFRESH_TOKEN"]
+
           folder_id = os.environ["DRIVE_FOLDER_ID"]
           video_name = os.environ["VIDEO_NAME"]
+
           webhook_url = os.environ["N8N_WEBHOOK_URL"]
 
-          # =========================
+
+          # ==========================================
           # Get Google Access Token
-          # =========================
+          # ==========================================
+
+          print("Getting Google access token...")
 
           token_resp = requests.post(
               "https://oauth2.googleapis.com/token",
@@ -36,9 +142,14 @@
               }
           )
 
+
           if token_resp.status_code != 200:
-              print("Token error:", token_resp.text)
+
+              print("Token error:")
+              print(token_resp.text)
+
               sys.exit(1)
+
 
           access_token = token_resp.json()["access_token"]
 
@@ -46,49 +157,98 @@
               "Authorization": f"Bearer {access_token}"
           }
 
-          # =========================
-          # Delete existing file
-          # =========================
+
+          print("Google access token obtained successfully.")
+
+
+          # ==========================================
+          # Search for existing file
+          # ==========================================
+
+          print("Searching for existing file...")
 
           search_url = (
-              f"https://www.googleapis.com/drive/v3/files"
-              f"?q=name='{video_name}' and '{folder_id}' in parents"
-              f"&fields=files(id,name)"
+              "https://www.googleapis.com/drive/v3/files"
+              f"?q=name='{video_name}' "
+              f"and '{folder_id}' in parents "
+              "&fields=files(id,name)"
           )
 
-          resp = requests.get(search_url, headers=headers)
+
+          resp = requests.get(
+              search_url,
+              headers=headers
+          )
+
 
           if resp.status_code == 200:
+
               existing_files = resp.json().get("files", [])
 
-              for f in existing_files:
+              print(
+                  f"Found {len(existing_files)} existing file(s)."
+              )
+
+
+              # ==========================================
+              # Delete existing files
+              # ==========================================
+
+              for existing_file in existing_files:
+
+                  existing_id = existing_file["id"]
+                  existing_name = existing_file["name"]
+
                   delete_url = (
-                      f"https://www.googleapis.com/drive/v3/files/{f['id']}"
+                      "https://www.googleapis.com/drive/v3/files/"
+                      f"{existing_id}"
                   )
+
 
                   del_resp = requests.delete(
                       delete_url,
                       headers=headers
                   )
 
-                  if del_resp.status_code in [204, 200]:
-                      print(f"Deleted existing file: {f['name']}")
-                  else:
+
+                  if del_resp.status_code in [200, 204]:
+
                       print(
-                          f"Failed to delete {f['name']}: "
+                          f"Deleted existing file: {existing_name}"
+                      )
+
+                  else:
+
+                      print(
+                          f"Failed to delete {existing_name}: "
                           f"{del_resp.text}"
                       )
-          else:
-              print("Search failed:", resp.text)
 
-          # =========================
-          # Upload video
-          # =========================
+          else:
+
+              print(
+                  "Search failed:",
+                  resp.status_code,
+                  resp.text
+              )
+
+
+          # ==========================================
+          # Prepare upload metadata
+          # ==========================================
 
           metadata = {
               "name": video_name,
-              "parents": [folder_id],
+              "parents": [folder_id]
           }
+
+
+          # ==========================================
+          # Upload video
+          # ==========================================
+
+          print("Uploading video to Google Drive...")
+
 
           with open("output_final.mp4", "rb") as video_file:
 
@@ -98,62 +258,171 @@
                       json.dumps(metadata),
                       "application/json"
                   ),
-                  "file": video_file,
+
+                  "file": (
+                      "output_final.mp4",
+                      video_file,
+                      "video/mp4"
+                  )
               }
 
-              upload = requests.post(
-                  "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+
+              upload_resp = requests.post(
+
+                  "https://www.googleapis.com/upload/drive/v3/files"
+                  "?uploadType=multipart",
+
                   headers=headers,
-                  files=files,
+
+                  files=files
               )
 
-          result = upload.json()
 
-          print("Drive response:", result)
+          # ==========================================
+          # Check upload response
+          # ==========================================
 
-          # =========================
-          # Get File ID
-          # =========================
+          print(
+              "Google Drive HTTP status:",
+              upload_resp.status_code
+          )
+
+
+          try:
+
+              result = upload_resp.json()
+
+          except Exception:
+
+              print(
+                  "Invalid Google Drive response:"
+              )
+
+              print(upload_resp.text)
+
+              sys.exit(1)
+
+
+          print(
+              "Drive response:",
+              result
+          )
+
+
+          # ==========================================
+          # Get file ID
+          # ==========================================
 
           file_id = result.get("id")
 
+
           if not file_id:
-              print("Upload failed")
+
+              print(
+                  "Upload failed - no file ID returned."
+              )
+
               sys.exit(1)
 
-          drive_url = f"https://drive.google.com/file/d/{file_id}/view"
 
+          drive_url = (
+              f"https://drive.google.com/file/d/"
+              f"{file_id}/view"
+          )
+
+
+          print("")
+          print("==========================================")
+          print("UPLOAD SUCCESS")
+          print("==========================================")
           print("Video File ID:", file_id)
           print("Drive URL:", drive_url)
+          print("==========================================")
 
-          # =========================
-          # Send videoFileId to n8n
-          # =========================
+
+          # ==========================================
+          # Send videoFileId to n8n Webhook
+          # ==========================================
+
+          print("")
+          print("Sending videoFileId to n8n...")
+
 
           webhook_payload = {
               "videoFileId": file_id
           }
 
+
+          webhook_headers = {
+              "Content-Type": "application/json"
+          }
+
+
           webhook_resp = requests.post(
+
               webhook_url,
+
               json=webhook_payload,
+
+              headers=webhook_headers,
+
               timeout=30
           )
 
-          print("n8n Webhook status:", webhook_resp.status_code)
-          print("n8n Webhook response:", webhook_resp.text)
 
-          if webhook_resp.status_code < 200 or webhook_resp.status_code >= 300:
-              print("Failed to send videoFileId to n8n")
+          print(
+              "n8n Webhook HTTP status:",
+              webhook_resp.status_code
+          )
+
+
+          print(
+              "n8n Webhook response:",
+              webhook_resp.text
+          )
+
+
+          # ==========================================
+          # Check n8n response
+          # ==========================================
+
+          if not (
+              200 <= webhook_resp.status_code < 300
+          ):
+
+              print(
+                  "ERROR: Failed to send videoFileId to n8n."
+              )
+
               sys.exit(1)
 
-          print("videoFileId successfully sent to n8n")
 
-          # =========================
-          # GitHub Actions Output
-          # =========================
+          print("")
+          print(
+              "videoFileId successfully sent to n8n."
+          )
 
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"drive_url={drive_url}\n")
-              f.write(f"video_file_id={file_id}\n")
+
+          # ==========================================
+          # GitHub Actions Outputs
+          # ==========================================
+
+          with open(
+              os.environ["GITHUB_OUTPUT"],
+              "a"
+          ) as output_file:
+
+              output_file.write(
+                  f"drive_url={drive_url}\n"
+              )
+
+              output_file.write(
+                  f"video_file_id={file_id}\n"
+              )
+
+
+          print("")
+          print("GitHub outputs created successfully.")
+
+          EOF
 ```
