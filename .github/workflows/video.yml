@@ -24,10 +24,10 @@ jobs:
     steps:
 
       # ==========================================
-      # Install FFmpeg + Python dependencies
+      # Install basic dependencies
       # ==========================================
 
-      - name: Install FFmpeg + Python deps
+      - name: Install dependencies
         run: |
           set -e
 
@@ -50,61 +50,97 @@ jobs:
             sleep 5
           done
 
-          sudo apt install -y wget python3-pip
+          sudo apt install -y wget python3-pip file
 
           pip3 install --user requests
 
 
       # ==========================================
-      # Download FFmpeg 7 static with retry
+      # Download / Install FFmpeg
       # ==========================================
 
-      - name: Download FFmpeg 7 static
+      - name: Install / Download FFmpeg
         run: |
           set -e
 
-          URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz"
-          FILE="ffmpeg-7.0.2-amd64-static.tar.xz"
+          FFMPEG_DIR="$HOME/ffmpeg-bin"
 
-          rm -f "$FILE"
+          rm -rf "$FFMPEG_DIR"
+          mkdir -p "$FFMPEG_DIR"
 
           SUCCESS=0
 
-          for i in 1 2 3 4 5; do
+
+          # ==========================================
+          # SOURCE 1
+          # John Van Sickle
+          # ==========================================
+
+          echo ""
+          echo "=========================================="
+          echo "FFmpeg source 1/3"
+          echo "John Van Sickle"
+          echo "=========================================="
+
+          URL1="https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz"
+
+          rm -f ffmpeg.tar.xz
+
+          for i in 1 2 3; do
 
             echo ""
-            echo "=========================================="
-            echo "FFmpeg download attempt $i/5"
-            echo "=========================================="
+            echo "Attempt $i/3"
 
-            rm -f "$FILE"
+            rm -f ffmpeg.tar.xz
 
             if wget \
-              --tries=3 \
               --timeout=30 \
-              --server-response \
-              -O "$FILE" \
-              "$URL"; then
+              --tries=2 \
+              -O ffmpeg.tar.xz \
+              "$URL1"; then
 
               echo "wget completed."
 
-              # Check that the file is actually an XZ archive
-              if file "$FILE" | grep -qi "XZ compressed"; then
+              if file ffmpeg.tar.xz | grep -qi "XZ compressed"; then
 
                 echo "Valid XZ archive detected."
 
-                SUCCESS=1
-                break
+                rm -rf ffmpeg-7.0.2-amd64-static
+
+                if tar -xf ffmpeg.tar.xz; then
+
+                  if [ -x "ffmpeg-7.0.2-amd64-static/ffmpeg" ]; then
+
+                    cp \
+                      ffmpeg-7.0.2-amd64-static/ffmpeg \
+                      "$FFMPEG_DIR/ffmpeg"
+
+                    if [ -f "ffmpeg-7.0.2-amd64-static/ffprobe" ]; then
+                      cp \
+                        ffmpeg-7.0.2-amd64-static/ffprobe \
+                        "$FFMPEG_DIR/ffprobe"
+                    fi
+
+                    chmod +x "$FFMPEG_DIR/ffmpeg"
+
+                    if [ -f "$FFMPEG_DIR/ffprobe" ]; then
+                      chmod +x "$FFMPEG_DIR/ffprobe"
+                    fi
+
+                    SUCCESS=1
+
+                    echo "FFmpeg installed from source 1."
+
+                    break
+
+                  fi
+
+                fi
 
               else
 
                 echo "Downloaded file is NOT a valid XZ archive."
-
-                echo "File information:"
-                file "$FILE"
-
-                echo "First bytes:"
-                head -c 200 "$FILE" || true
+                file ffmpeg.tar.xz
 
               fi
 
@@ -114,35 +150,206 @@ jobs:
 
             fi
 
-            if [ "$i" -lt 5 ]; then
-              echo "Waiting 10 seconds before retry..."
-              sleep 10
+            if [ "$i" -lt 3 ]; then
+              echo "Waiting 5 seconds..."
+              sleep 5
             fi
 
           done
 
+
+          # ==========================================
+          # SOURCE 2
+          # BtbN GitHub
+          # ==========================================
+
           if [ "$SUCCESS" -ne 1 ]; then
+
             echo ""
-            echo "ERROR: FFmpeg download failed after 5 attempts."
-            exit 1
+            echo "=========================================="
+            echo "FFmpeg source 2/3"
+            echo "BtbN GitHub"
+            echo "=========================================="
+
+            URL2="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+
+            rm -f ffmpeg.tar.xz
+
+            for i in 1 2 3; do
+
+              echo ""
+              echo "Attempt $i/3"
+
+              rm -f ffmpeg.tar.xz
+
+              if wget \
+                --timeout=60 \
+                --tries=2 \
+                -O ffmpeg.tar.xz \
+                "$URL2"; then
+
+                echo "wget completed."
+
+                if file ffmpeg.tar.xz | grep -qi "XZ compressed"; then
+
+                  echo "Valid XZ archive detected."
+
+                  rm -rf ffmpeg-master-latest-linux64-gpl
+
+                  if tar -xf ffmpeg.tar.xz; then
+
+                    FFMPEG_PATH=$(find . \
+                      -type f \
+                      -name ffmpeg \
+                      -perm -111 \
+                      | head -n 1)
+
+                    FFPROBE_PATH=$(find . \
+                      -type f \
+                      -name ffprobe \
+                      -perm -111 \
+                      | head -n 1)
+
+                    if [ -n "$FFMPEG_PATH" ]; then
+
+                      cp \
+                        "$FFMPEG_PATH" \
+                        "$FFMPEG_DIR/ffmpeg"
+
+                      chmod +x "$FFMPEG_DIR/ffmpeg"
+
+                      if [ -n "$FFPROBE_PATH" ]; then
+                        cp \
+                          "$FFPROBE_PATH" \
+                          "$FFMPEG_DIR/ffprobe"
+
+                        chmod +x "$FFMPEG_DIR/ffprobe"
+                      fi
+
+                      SUCCESS=1
+
+                      echo "FFmpeg installed from source 2."
+
+                      break
+
+                    fi
+
+                  fi
+
+                else
+
+                  echo "Downloaded file is NOT a valid XZ archive."
+                  file ffmpeg.tar.xz
+
+                fi
+
+              else
+
+                echo "wget failed."
+
+              fi
+
+              if [ "$i" -lt 3 ]; then
+                echo "Waiting 5 seconds..."
+                sleep 5
+              fi
+
+            done
+
           fi
 
+
+          # ==========================================
+          # SOURCE 3
+          # Ubuntu APT
+          # ==========================================
+
+          if [ "$SUCCESS" -ne 1 ]; then
+
+            echo ""
+            echo "=========================================="
+            echo "FFmpeg source 3/3"
+            echo "Ubuntu APT"
+            echo "=========================================="
+
+            for i in 1 2 3; do
+
+              echo ""
+              echo "APT FFmpeg install attempt $i/3"
+
+              if sudo apt install -y ffmpeg; then
+
+                if command -v ffmpeg >/dev/null 2>&1; then
+
+                  cp \
+                    "$(command -v ffmpeg)" \
+                    "$FFMPEG_DIR/ffmpeg"
+
+                  chmod +x "$FFMPEG_DIR/ffmpeg"
+
+                  if command -v ffprobe >/dev/null 2>&1; then
+
+                    cp \
+                      "$(command -v ffprobe)" \
+                      "$FFMPEG_DIR/ffprobe"
+
+                    chmod +x "$FFMPEG_DIR/ffprobe"
+
+                  fi
+
+                  SUCCESS=1
+
+                  echo "FFmpeg installed from Ubuntu APT."
+
+                  break
+
+                fi
+
+              else
+
+                echo "APT FFmpeg installation failed."
+
+              fi
+
+              if [ "$i" -lt 3 ]; then
+                echo "Waiting 5 seconds..."
+                sleep 5
+              fi
+
+            done
+
+          fi
+
+
+          # ==========================================
+          # Final FFmpeg check
+          # ==========================================
+
+          if [ "$SUCCESS" -ne 1 ]; then
+
+            echo ""
+            echo "=========================================="
+            echo "ERROR"
+            echo "=========================================="
+            echo "Unable to install FFmpeg."
+            exit 1
+
+          fi
+
+
+          echo "$FFMPEG_DIR" >> "$GITHUB_PATH"
+
+
           echo ""
-          echo "Extracting FFmpeg..."
+          echo "=========================================="
+          echo "FFmpeg successfully installed"
+          echo "=========================================="
 
-          rm -rf ffmpeg-7.0.2-amd64-static
-
-          tar -xf "$FILE"
-
-          chmod +x ffmpeg-7.0.2-amd64-static/ffmpeg
-
-          echo ""
-          echo "FFmpeg version:"
-          ./ffmpeg-7.0.2-amd64-static/ffmpeg -version
+          "$FFMPEG_DIR/ffmpeg" -version
 
 
       # ==========================================
-      # Download video with retry
+      # Download video
       # ==========================================
 
       - name: Download video
@@ -163,8 +370,8 @@ jobs:
             rm -f input.mp4
 
             if wget \
-              --tries=3 \
               --timeout=60 \
+              --tries=3 \
               --continue \
               -O input.mp4 \
               "$VIDEO_URL"; then
@@ -174,6 +381,7 @@ jobs:
                 echo "Video downloaded successfully."
 
                 SUCCESS=1
+
                 break
 
               else
@@ -195,10 +403,16 @@ jobs:
 
           done
 
+
           if [ "$SUCCESS" -ne 1 ]; then
+
+            echo ""
             echo "ERROR: Video download failed after 5 attempts."
+
             exit 1
+
           fi
+
 
           echo ""
           echo "Downloaded video:"
@@ -224,7 +438,7 @@ jobs:
 
             rm -f output_cropped.mp4
 
-            if ./ffmpeg-7.0.2-amd64-static/ffmpeg \
+            if ffmpeg \
               -y \
               -i input.mp4 \
               -vf "crop=in_w:545,scale=1280:720,setsar=1" \
@@ -235,6 +449,7 @@ jobs:
                 echo "Crop completed successfully."
 
                 SUCCESS=1
+
                 break
 
               else
@@ -256,16 +471,22 @@ jobs:
 
           done
 
+
           if [ "$SUCCESS" -ne 1 ]; then
+
+            echo ""
             echo "ERROR: Crop failed after 5 attempts."
+
             exit 1
+
           fi
+
 
           ls -lh output_cropped.mp4
 
 
       # ==========================================
-      # Add waveform starting at 13s
+      # Add waveform starting at 13 seconds
       # ==========================================
 
       - name: Add waveform starting at 13s
@@ -283,7 +504,7 @@ jobs:
 
             rm -f output_final.mp4
 
-            if ./ffmpeg-7.0.2-amd64-static/ffmpeg \
+            if ffmpeg \
               -y \
               -i output_cropped.mp4 \
               -filter_complex "\
@@ -300,6 +521,7 @@ jobs:
                 echo "Waveform processing completed successfully."
 
                 SUCCESS=1
+
                 break
 
               else
@@ -321,10 +543,16 @@ jobs:
 
           done
 
+
           if [ "$SUCCESS" -ne 1 ]; then
+
+            echo ""
             echo "ERROR: Waveform processing failed after 5 attempts."
+
             exit 1
+
           fi
+
 
           ls -lh output_final.mp4
 
@@ -372,7 +600,7 @@ jobs:
 
 
           # ==========================================
-          # Helper: retry HTTP request
+          # Retry HTTP request
           # ==========================================
 
           def request_with_retry(
@@ -388,8 +616,10 @@ jobs:
 
                   print("")
                   print("==========================================")
-                  print(f"{method} attempt {attempt}/{max_attempts}")
-                  print(url)
+                  print(
+                      f"{method} attempt "
+                      f"{attempt}/{max_attempts}"
+                  )
                   print("==========================================")
 
                   try:
@@ -407,14 +637,17 @@ jobs:
                           response.status_code
                       )
 
-                      # Success
+
                       if 200 <= response.status_code < 300:
+
                           return response
+
 
                       print(
                           "Request failed:",
                           response.text[:1000]
                       )
+
 
                   except Exception as e:
 
@@ -422,6 +655,7 @@ jobs:
                           "Request exception:",
                           str(e)
                       )
+
 
                   if attempt < max_attempts:
 
@@ -432,6 +666,7 @@ jobs:
                       )
 
                       time.sleep(wait_time)
+
 
               return last_response
 
@@ -459,10 +694,14 @@ jobs:
               },
 
               timeout=30
+
           )
 
 
-          if token_resp is None or token_resp.status_code != 200:
+          if (
+              token_resp is None
+              or token_resp.status_code != 200
+          ):
 
               print("Token error:")
 
@@ -516,10 +755,14 @@ jobs:
               headers=headers,
 
               timeout=30
+
           )
 
 
-          if resp is not None and resp.status_code == 200:
+          if (
+              resp is not None
+              and resp.status_code == 200
+          ):
 
               existing_files = resp.json().get(
                   "files",
@@ -562,15 +805,13 @@ jobs:
                       headers=headers,
 
                       timeout=30
+
                   )
 
 
                   if (
-
                       del_resp is not None
-
                       and del_resp.status_code in [200, 204]
-
                   ):
 
                       print(
@@ -590,6 +831,7 @@ jobs:
               )
 
               if resp is not None:
+
                   print(
                       resp.status_code,
                       resp.text
@@ -613,7 +855,9 @@ jobs:
           # Upload video
           # ==========================================
 
-          print("Uploading video to Google Drive...")
+          print(
+              "Uploading video to Google Drive..."
+          )
 
 
           upload_success = False
@@ -683,9 +927,14 @@ jobs:
                   )
 
 
-                  if 200 <= upload_resp.status_code < 300:
+                  if (
+                      200
+                      <= upload_resp.status_code
+                      < 300
+                  ):
 
                       upload_success = True
+
                       break
 
 
@@ -796,7 +1045,9 @@ jobs:
           # ==========================================
 
           print("")
-          print("Sending videoFileId to n8n...")
+          print(
+              "Sending videoFileId to n8n..."
+          )
 
 
           webhook_payload = {
@@ -856,14 +1107,13 @@ jobs:
 
 
                   if (
-
                       200
                       <= webhook_resp.status_code
                       < 300
-
                   ):
 
                       webhook_success = True
+
                       break
 
 
@@ -912,23 +1162,16 @@ jobs:
           # ==========================================
 
           with open(
-
               os.environ["GITHUB_OUTPUT"],
-
               "a"
-
           ) as output_file:
 
               output_file.write(
-
                   f"drive_url={drive_url}\n"
-
               )
 
               output_file.write(
-
                   f"video_file_id={file_id}\n"
-
               )
 
 
