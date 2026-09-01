@@ -29,29 +29,180 @@ jobs:
 
       - name: Install FFmpeg + Python deps
         run: |
-          sudo apt update
+          set -e
+
+          echo "Updating apt..."
+
+          for i in 1 2 3 4 5; do
+            echo "APT update attempt $i/5"
+
+            if sudo apt update; then
+              echo "APT update succeeded."
+              break
+            fi
+
+            if [ "$i" -eq 5 ]; then
+              echo "ERROR: apt update failed after 5 attempts."
+              exit 1
+            fi
+
+            echo "Waiting 5 seconds before retry..."
+            sleep 5
+          done
+
           sudo apt install -y wget python3-pip
-          pip3 install requests
+
+          pip3 install --user requests
 
 
       # ==========================================
-      # Download FFmpeg
+      # Download FFmpeg 7 static with retry
       # ==========================================
 
       - name: Download FFmpeg 7 static
         run: |
-          wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz
-          tar -xf ffmpeg-7.0.2-amd64-static.tar.xz
+          set -e
+
+          URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz"
+          FILE="ffmpeg-7.0.2-amd64-static.tar.xz"
+
+          rm -f "$FILE"
+
+          SUCCESS=0
+
+          for i in 1 2 3 4 5; do
+
+            echo ""
+            echo "=========================================="
+            echo "FFmpeg download attempt $i/5"
+            echo "=========================================="
+
+            rm -f "$FILE"
+
+            if wget \
+              --tries=3 \
+              --timeout=30 \
+              --server-response \
+              -O "$FILE" \
+              "$URL"; then
+
+              echo "wget completed."
+
+              # Check that the file is actually an XZ archive
+              if file "$FILE" | grep -qi "XZ compressed"; then
+
+                echo "Valid XZ archive detected."
+
+                SUCCESS=1
+                break
+
+              else
+
+                echo "Downloaded file is NOT a valid XZ archive."
+
+                echo "File information:"
+                file "$FILE"
+
+                echo "First bytes:"
+                head -c 200 "$FILE" || true
+
+              fi
+
+            else
+
+              echo "wget failed."
+
+            fi
+
+            if [ "$i" -lt 5 ]; then
+              echo "Waiting 10 seconds before retry..."
+              sleep 10
+            fi
+
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo ""
+            echo "ERROR: FFmpeg download failed after 5 attempts."
+            exit 1
+          fi
+
+          echo ""
+          echo "Extracting FFmpeg..."
+
+          rm -rf ffmpeg-7.0.2-amd64-static
+
+          tar -xf "$FILE"
+
           chmod +x ffmpeg-7.0.2-amd64-static/ffmpeg
+
+          echo ""
+          echo "FFmpeg version:"
+          ./ffmpeg-7.0.2-amd64-static/ffmpeg -version
 
 
       # ==========================================
-      # Download video
+      # Download video with retry
       # ==========================================
 
       - name: Download video
         run: |
-          wget -O input.mp4 "${{ github.event.inputs.video_url }}"
+          set -e
+
+          VIDEO_URL="${{ github.event.inputs.video_url }}"
+
+          SUCCESS=0
+
+          for i in 1 2 3 4 5; do
+
+            echo ""
+            echo "=========================================="
+            echo "Video download attempt $i/5"
+            echo "=========================================="
+
+            rm -f input.mp4
+
+            if wget \
+              --tries=3 \
+              --timeout=60 \
+              --continue \
+              -O input.mp4 \
+              "$VIDEO_URL"; then
+
+              if [ -s input.mp4 ]; then
+
+                echo "Video downloaded successfully."
+
+                SUCCESS=1
+                break
+
+              else
+
+                echo "Downloaded file is empty."
+
+              fi
+
+            else
+
+              echo "Video download failed."
+
+            fi
+
+            if [ "$i" -lt 5 ]; then
+              echo "Waiting 10 seconds before retry..."
+              sleep 10
+            fi
+
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "ERROR: Video download failed after 5 attempts."
+            exit 1
+          fi
+
+          echo ""
+          echo "Downloaded video:"
+          ls -lh input.mp4
 
 
       # ==========================================
@@ -60,28 +211,122 @@ jobs:
 
       - name: Crop top & bottom then scale
         run: |
-          ./ffmpeg-7.0.2-amd64-static/ffmpeg \
-            -i input.mp4 \
-            -vf "crop=in_w:545,scale=1280:720,setsar=1" \
-            output_cropped.mp4
+          set -e
+
+          SUCCESS=0
+
+          for i in 1 2 3 4 5; do
+
+            echo ""
+            echo "=========================================="
+            echo "Crop attempt $i/5"
+            echo "=========================================="
+
+            rm -f output_cropped.mp4
+
+            if ./ffmpeg-7.0.2-amd64-static/ffmpeg \
+              -y \
+              -i input.mp4 \
+              -vf "crop=in_w:545,scale=1280:720,setsar=1" \
+              output_cropped.mp4; then
+
+              if [ -s output_cropped.mp4 ]; then
+
+                echo "Crop completed successfully."
+
+                SUCCESS=1
+                break
+
+              else
+
+                echo "Output file is empty."
+
+              fi
+
+            else
+
+              echo "FFmpeg crop failed."
+
+            fi
+
+            if [ "$i" -lt 5 ]; then
+              echo "Waiting 5 seconds before retry..."
+              sleep 5
+            fi
+
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "ERROR: Crop failed after 5 attempts."
+            exit 1
+          fi
+
+          ls -lh output_cropped.mp4
 
 
       # ==========================================
-      # Add waveform starting at 13 seconds
+      # Add waveform starting at 13s
       # ==========================================
 
       - name: Add waveform starting at 13s
         run: |
-          ./ffmpeg-7.0.2-amd64-static/ffmpeg \
-            -i output_cropped.mp4 \
-            -filter_complex "\
-            [0:a]compand,showwaves=s=629x8:colors=white@1:draw=full:mode=p2p,format=yuva420p[wave]; \
-            [0:v][wave]overlay=x=541:y=616:format=auto:enable='gte(t,13)',format=yuv420p[outv]" \
-            -map "[outv]" \
-            -map 0:a \
-            -c:v libx264 \
-            -c:a copy \
-            output_final.mp4
+          set -e
+
+          SUCCESS=0
+
+          for i in 1 2 3 4 5; do
+
+            echo ""
+            echo "=========================================="
+            echo "Waveform attempt $i/5"
+            echo "=========================================="
+
+            rm -f output_final.mp4
+
+            if ./ffmpeg-7.0.2-amd64-static/ffmpeg \
+              -y \
+              -i output_cropped.mp4 \
+              -filter_complex "\
+              [0:a]compand,showwaves=s=629x8:colors=white@1:draw=full:mode=p2p,format=yuva420p[wave]; \
+              [0:v][wave]overlay=x=541:y=616:format=auto:enable='gte(t,13)',format=yuv420p[outv]" \
+              -map "[outv]" \
+              -map 0:a \
+              -c:v libx264 \
+              -c:a copy \
+              output_final.mp4; then
+
+              if [ -s output_final.mp4 ]; then
+
+                echo "Waveform processing completed successfully."
+
+                SUCCESS=1
+                break
+
+              else
+
+                echo "Output file is empty."
+
+              fi
+
+            else
+
+              echo "FFmpeg waveform processing failed."
+
+            fi
+
+            if [ "$i" -lt 5 ]; then
+              echo "Waiting 5 seconds before retry..."
+              sleep 5
+            fi
+
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "ERROR: Waveform processing failed after 5 attempts."
+            exit 1
+          fi
+
+          ls -lh output_final.mp4
 
 
       # ==========================================
@@ -109,6 +354,7 @@ jobs:
           import requests
           import json
           import sys
+          import time
 
 
           # ==========================================
@@ -126,38 +372,117 @@ jobs:
 
 
           # ==========================================
+          # Helper: retry HTTP request
+          # ==========================================
+
+          def request_with_retry(
+              method,
+              url,
+              max_attempts=5,
+              **kwargs
+          ):
+
+              last_response = None
+
+              for attempt in range(1, max_attempts + 1):
+
+                  print("")
+                  print("==========================================")
+                  print(f"{method} attempt {attempt}/{max_attempts}")
+                  print(url)
+                  print("==========================================")
+
+                  try:
+
+                      response = requests.request(
+                          method,
+                          url,
+                          **kwargs
+                      )
+
+                      last_response = response
+
+                      print(
+                          "HTTP status:",
+                          response.status_code
+                      )
+
+                      # Success
+                      if 200 <= response.status_code < 300:
+                          return response
+
+                      print(
+                          "Request failed:",
+                          response.text[:1000]
+                      )
+
+                  except Exception as e:
+
+                      print(
+                          "Request exception:",
+                          str(e)
+                      )
+
+                  if attempt < max_attempts:
+
+                      wait_time = attempt * 5
+
+                      print(
+                          f"Waiting {wait_time} seconds..."
+                      )
+
+                      time.sleep(wait_time)
+
+              return last_response
+
+
+          # ==========================================
           # Get Google Access Token
           # ==========================================
 
           print("Getting Google access token...")
 
-          token_resp = requests.post(
+
+          token_resp = request_with_retry(
+
+              "POST",
+
               "https://oauth2.googleapis.com/token",
+
+              max_attempts=5,
+
               data={
                   "client_id": client_id,
                   "client_secret": client_secret,
                   "refresh_token": refresh_token,
                   "grant_type": "refresh_token"
-              }
+              },
+
+              timeout=30
           )
 
 
-          if token_resp.status_code != 200:
+          if token_resp is None or token_resp.status_code != 200:
 
               print("Token error:")
-              print(token_resp.text)
+
+              if token_resp is not None:
+                  print(token_resp.text)
 
               sys.exit(1)
 
 
           access_token = token_resp.json()["access_token"]
 
+
           headers = {
               "Authorization": f"Bearer {access_token}"
           }
 
 
-          print("Google access token obtained successfully.")
+          print(
+              "Google access token obtained successfully."
+          )
 
 
           # ==========================================
@@ -166,23 +491,41 @@ jobs:
 
           print("Searching for existing file...")
 
+
           search_url = (
+
               "https://www.googleapis.com/drive/v3/files"
+
               f"?q=name='{video_name}' "
+
               f"and '{folder_id}' in parents "
+
               "&fields=files(id,name)"
+
           )
 
 
-          resp = requests.get(
+          resp = request_with_retry(
+
+              "GET",
+
               search_url,
-              headers=headers
+
+              max_attempts=5,
+
+              headers=headers,
+
+              timeout=30
           )
 
 
-          if resp.status_code == 200:
+          if resp is not None and resp.status_code == 200:
 
-              existing_files = resp.json().get("files", [])
+              existing_files = resp.json().get(
+                  "files",
+                  []
+              )
+
 
               print(
                   f"Found {len(existing_files)} existing file(s)."
@@ -198,19 +541,37 @@ jobs:
                   existing_id = existing_file["id"]
                   existing_name = existing_file["name"]
 
+
                   delete_url = (
+
                       "https://www.googleapis.com/drive/v3/files/"
+
                       f"{existing_id}"
+
                   )
 
 
-                  del_resp = requests.delete(
+                  del_resp = request_with_retry(
+
+                      "DELETE",
+
                       delete_url,
-                      headers=headers
+
+                      max_attempts=5,
+
+                      headers=headers,
+
+                      timeout=30
                   )
 
 
-                  if del_resp.status_code in [200, 204]:
+                  if (
+
+                      del_resp is not None
+
+                      and del_resp.status_code in [200, 204]
+
+                  ):
 
                       print(
                           f"Deleted existing file: {existing_name}"
@@ -219,17 +580,20 @@ jobs:
                   else:
 
                       print(
-                          f"Failed to delete {existing_name}: "
-                          f"{del_resp.text}"
+                          f"Failed to delete {existing_name}"
                       )
 
           else:
 
               print(
-                  "Search failed:",
-                  resp.status_code,
-                  resp.text
+                  "Search failed."
               )
+
+              if resp is not None:
+                  print(
+                      resp.status_code,
+                      resp.text
+                  )
 
 
           # ==========================================
@@ -237,8 +601,11 @@ jobs:
           # ==========================================
 
           metadata = {
+
               "name": video_name,
+
               "parents": [folder_id]
+
           }
 
 
@@ -249,43 +616,119 @@ jobs:
           print("Uploading video to Google Drive...")
 
 
-          with open("output_final.mp4", "rb") as video_file:
+          upload_success = False
+          upload_resp = None
 
-              files = {
-                  "metadata": (
-                      "metadata",
-                      json.dumps(metadata),
-                      "application/json"
-                  ),
 
-                  "file": (
+          for attempt in range(1, 6):
+
+              print("")
+              print("==========================================")
+              print(
+                  f"Google Drive upload attempt "
+                  f"{attempt}/5"
+              )
+              print("==========================================")
+
+
+              try:
+
+                  with open(
                       "output_final.mp4",
-                      video_file,
-                      "video/mp4"
+                      "rb"
+                  ) as video_file:
+
+                      files = {
+
+                          "metadata": (
+
+                              "metadata",
+
+                              json.dumps(metadata),
+
+                              "application/json"
+
+                          ),
+
+                          "file": (
+
+                              "output_final.mp4",
+
+                              video_file,
+
+                              "video/mp4"
+
+                          )
+
+                      }
+
+
+                      upload_resp = requests.post(
+
+                          "https://www.googleapis.com/upload/drive/v3/files"
+                          "?uploadType=multipart",
+
+                          headers=headers,
+
+                          files=files,
+
+                          timeout=600
+
+                      )
+
+
+                  print(
+                      "Google Drive HTTP status:",
+                      upload_resp.status_code
                   )
-              }
 
 
-              upload_resp = requests.post(
+                  if 200 <= upload_resp.status_code < 300:
 
-                  "https://www.googleapis.com/upload/drive/v3/files"
-                  "?uploadType=multipart",
+                      upload_success = True
+                      break
 
-                  headers=headers,
 
-                  files=files
+                  print(
+                      "Upload failed:",
+                      upload_resp.text[:1000]
+                  )
+
+
+              except Exception as e:
+
+                  print(
+                      "Upload exception:",
+                      str(e)
+                  )
+
+
+              if attempt < 5:
+
+                  wait_time = attempt * 10
+
+                  print(
+                      f"Waiting {wait_time} seconds "
+                      "before retry..."
+                  )
+
+                  time.sleep(wait_time)
+
+
+          if not upload_success:
+
+              print("")
+              print(
+                  "ERROR: Google Drive upload failed "
+                  "after 5 attempts."
               )
 
+              sys.exit(1)
+
 
           # ==========================================
-          # Check upload response
+          # Parse upload response
           # ==========================================
-
-          print(
-              "Google Drive HTTP status:",
-              upload_resp.status_code
-          )
-
 
           try:
 
@@ -325,8 +768,11 @@ jobs:
 
 
           drive_url = (
+
               f"https://drive.google.com/file/d/"
+
               f"{file_id}/view"
+
           )
 
 
@@ -334,8 +780,14 @@ jobs:
           print("==========================================")
           print("UPLOAD SUCCESS")
           print("==========================================")
-          print("Video File ID:", file_id)
-          print("Drive URL:", drive_url)
+          print(
+              "Video File ID:",
+              file_id
+          )
+          print(
+              "Drive URL:",
+              drive_url
+          )
           print("==========================================")
 
 
@@ -348,49 +800,102 @@ jobs:
 
 
           webhook_payload = {
+
               "videoFileId": file_id
+
           }
 
 
           webhook_headers = {
+
               "Content-Type": "application/json"
+
           }
 
 
-          webhook_resp = requests.post(
-
-              webhook_url,
-
-              json=webhook_payload,
-
-              headers=webhook_headers,
-
-              timeout=30
-          )
+          webhook_success = False
+          webhook_resp = None
 
 
-          print(
-              "n8n Webhook HTTP status:",
-              webhook_resp.status_code
-          )
+          for attempt in range(1, 6):
+
+              print("")
+              print("==========================================")
+              print(
+                  f"n8n webhook attempt "
+                  f"{attempt}/5"
+              )
+              print("==========================================")
 
 
-          print(
-              "n8n Webhook response:",
-              webhook_resp.text
-          )
+              try:
+
+                  webhook_resp = requests.post(
+
+                      webhook_url,
+
+                      json=webhook_payload,
+
+                      headers=webhook_headers,
+
+                      timeout=30
+
+                  )
+
+
+                  print(
+                      "n8n Webhook HTTP status:",
+                      webhook_resp.status_code
+                  )
+
+
+                  print(
+                      "n8n Webhook response:",
+                      webhook_resp.text[:1000]
+                  )
+
+
+                  if (
+
+                      200
+                      <= webhook_resp.status_code
+                      < 300
+
+                  ):
+
+                      webhook_success = True
+                      break
+
+
+              except Exception as e:
+
+                  print(
+                      "Webhook exception:",
+                      str(e)
+                  )
+
+
+              if attempt < 5:
+
+                  wait_time = attempt * 5
+
+                  print(
+                      f"Waiting {wait_time} seconds..."
+                  )
+
+                  time.sleep(wait_time)
 
 
           # ==========================================
           # Check n8n response
           # ==========================================
 
-          if not (
-              200 <= webhook_resp.status_code < 300
-          ):
+          if not webhook_success:
 
+              print("")
               print(
-                  "ERROR: Failed to send videoFileId to n8n."
+                  "ERROR: Failed to send videoFileId "
+                  "to n8n after 5 attempts."
               )
 
               sys.exit(1)
@@ -407,20 +912,29 @@ jobs:
           # ==========================================
 
           with open(
+
               os.environ["GITHUB_OUTPUT"],
+
               "a"
+
           ) as output_file:
 
               output_file.write(
+
                   f"drive_url={drive_url}\n"
+
               )
 
               output_file.write(
+
                   f"video_file_id={file_id}\n"
+
               )
 
 
           print("")
-          print("GitHub outputs created successfully.")
+          print(
+              "GitHub outputs created successfully."
+          )
 
           EOF
