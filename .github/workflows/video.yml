@@ -6,20 +6,33 @@ on:
       video_url:
         description: 'Video URL'
         required: true
+        type: string
+
       drive_folder_id:
         description: 'Google Drive folder ID to upload video'
         required: true
+        type: string
+
       video_name:
         description: 'Name for the uploaded video'
         required: true
+        type: string
+
+      webhook_url:
+        description: 'n8n Webhook URL to call after upload'
+        required: true
+        type: string
+
 
 jobs:
   process-video:
+
     runs-on: ubuntu-latest
 
     outputs:
       drive_url: ${{ steps.upload.outputs.drive_url }}
       video_file_id: ${{ steps.upload.outputs.video_file_id }}
+
 
     steps:
 
@@ -28,6 +41,7 @@ jobs:
       # ==========================================
 
       - name: Install dependencies
+
         run: |
           set -e
 
@@ -60,6 +74,7 @@ jobs:
       # ==========================================
 
       - name: Install / Download FFmpeg
+
         run: |
           set -e
 
@@ -219,11 +234,13 @@ jobs:
                       chmod +x "$FFMPEG_DIR/ffmpeg"
 
                       if [ -n "$FFPROBE_PATH" ]; then
+
                         cp \
                           "$FFPROBE_PATH" \
                           "$FFMPEG_DIR/ffprobe"
 
                         chmod +x "$FFMPEG_DIR/ffprobe"
+
                       fi
 
                       SUCCESS=1
@@ -331,7 +348,9 @@ jobs:
             echo "=========================================="
             echo "ERROR"
             echo "=========================================="
+
             echo "Unable to install FFmpeg."
+
             exit 1
 
           fi
@@ -353,6 +372,7 @@ jobs:
       # ==========================================
 
       - name: Download video
+
         run: |
           set -e
 
@@ -416,6 +436,7 @@ jobs:
 
           echo ""
           echo "Downloaded video:"
+
           ls -lh input.mp4
 
 
@@ -424,6 +445,7 @@ jobs:
       # ==========================================
 
       - name: Crop top & bottom then scale
+
         run: |
           set -e
 
@@ -490,6 +512,7 @@ jobs:
       # ==========================================
 
       - name: Add waveform starting at 13s
+
         run: |
           set -e
 
@@ -562,6 +585,7 @@ jobs:
       # ==========================================
 
       - name: Upload to Google Drive
+
         id: upload
 
         env:
@@ -572,7 +596,13 @@ jobs:
           DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
           VIDEO_NAME: ${{ github.event.inputs.video_name }}
 
-          N8N_WEBHOOK_URL: https://n8n-2tgd.onrender.com/webhook/35833a97-aa94-4207-90cc-479bc5c31a71
+          # ==========================================
+          # IMPORTANT:
+          # Webhook URL now comes from n8n
+          # ==========================================
+
+          N8N_WEBHOOK_URL: ${{ github.event.inputs.webhook_url }}
+
 
         run: |
 
@@ -596,7 +626,22 @@ jobs:
           folder_id = os.environ["DRIVE_FOLDER_ID"]
           video_name = os.environ["VIDEO_NAME"]
 
+          # Webhook URL sent dynamically by n8n
           webhook_url = os.environ["N8N_WEBHOOK_URL"]
+
+
+          # ==========================================
+          # Validate webhook URL
+          # ==========================================
+
+          if not webhook_url:
+
+              print("ERROR: N8N_WEBHOOK_URL is empty.")
+
+              sys.exit(1)
+
+
+          print("n8n Webhook URL received successfully.")
 
 
           # ==========================================
@@ -616,11 +661,14 @@ jobs:
 
                   print("")
                   print("==========================================")
+
                   print(
                       f"{method} attempt "
                       f"{attempt}/{max_attempts}"
                   )
+
                   print("==========================================")
+
 
                   try:
 
@@ -631,6 +679,7 @@ jobs:
                       )
 
                       last_response = response
+
 
                       print(
                           "HTTP status:",
@@ -868,10 +917,12 @@ jobs:
 
               print("")
               print("==========================================")
+
               print(
                   f"Google Drive upload attempt "
                   f"{attempt}/5"
               )
+
               print("==========================================")
 
 
@@ -967,6 +1018,7 @@ jobs:
           if not upload_success:
 
               print("")
+
               print(
                   "ERROR: Google Drive upload failed "
                   "after 5 attempts."
@@ -1029,30 +1081,40 @@ jobs:
           print("==========================================")
           print("UPLOAD SUCCESS")
           print("==========================================")
+
+
           print(
               "Video File ID:",
               file_id
           )
+
+
           print(
               "Drive URL:",
               drive_url
           )
+
+
           print("==========================================")
 
 
           # ==========================================
-          # Send videoFileId to n8n Webhook
+          # Send result to n8n Webhook
           # ==========================================
 
           print("")
           print(
-              "Sending videoFileId to n8n..."
+              "Sending video result to n8n..."
           )
 
 
           webhook_payload = {
 
-              "videoFileId": file_id
+              "videoFileId": file_id,
+
+              "drive_url": drive_url,
+
+              "video_name": video_name
 
           }
 
@@ -1072,10 +1134,12 @@ jobs:
 
               print("")
               print("==========================================")
+
               print(
                   f"n8n webhook attempt "
                   f"{attempt}/5"
               )
+
               print("==========================================")
 
 
@@ -1143,8 +1207,9 @@ jobs:
           if not webhook_success:
 
               print("")
+
               print(
-                  "ERROR: Failed to send videoFileId "
+                  "ERROR: Failed to send video result "
                   "to n8n after 5 attempts."
               )
 
@@ -1152,8 +1217,9 @@ jobs:
 
 
           print("")
+
           print(
-              "videoFileId successfully sent to n8n."
+              "Video result successfully sent to n8n."
           )
 
 
@@ -1176,6 +1242,7 @@ jobs:
 
 
           print("")
+
           print(
               "GitHub outputs created successfully."
           )
