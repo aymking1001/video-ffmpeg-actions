@@ -584,6 +584,9 @@ jobs:
 
       # ==========================================================
       # CREATE MONTAGE
+      #
+      # Approach: split into multiple stages to guarantee CFR
+      # and avoid the xfade "1/0 invalid frame rate" error.
       # ==========================================================
 
       - name: Create montage
@@ -602,72 +605,134 @@ jobs:
             echo ""
             echo "Montage attempt $i/5"
 
-            rm -f montage.mp4
+            # ============================================================
+            # STEP 1: Prepare intro (trim to 9s, scale, CFR 30fps)
+            # ============================================================
+            echo "--- Step 1: Preparing intro ---"
 
-            if ffmpeg \
-              -y \
+            rm -f intro_prepared.mp4
+
+            if ! ffmpeg -y \
               -i intro.mp4 \
+              -t 9 \
+              -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p" \
+              -an \
+              -c:v libx264 \
+              -preset ultrafast \
+              -crf 18 \
+              -r 30 \
+              -fps_mode cfr \
+              -video_track_timescale 15360 \
+              intro_prepared.mp4; then
+              echo "Step 1 failed."
+              sleep 5
+              continue
+            fi
+
+            if [ ! -s intro_prepared.mp4 ]; then
+              echo "Step 1 produced empty file."
+              sleep 5
+              continue
+            fi
+
+            # ============================================================
+            # STEP 2: Prepare image (loop 5s, scale, CFR 30fps)
+            # ============================================================
+            echo "--- Step 2: Preparing image ---"
+
+            rm -f image_prepared.mp4
+
+            if ! ffmpeg -y \
               -loop 1 \
               -framerate 30 \
+              -t 5 \
               -i image.png \
-              -i audio.ogg \
-              -filter_complex "
-                [0:v]
-                scale=1920:1080:force_original_aspect_ratio=decrease,
-                pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
-                setsar=1,
-                fps=30,
-                trim=duration=9,
-                setpts=PTS-STARTPTS,
-                format=yuv420p
-                [intro];
-
-                [1:v]
-                scale=1920:1080:force_original_aspect_ratio=decrease,
-                pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
-                setsar=1,
-                fps=30,
-                setpts=PTS-STARTPTS,
-                format=yuv420p
-                [image];
-
-                [intro][image]
-                xfade=transition=fade:duration=1:offset=8,
-                fps=30,
-                format=yuv420p
-                [video]
-              " \
-              -map "[video]" \
-              -map 2:a \
+              -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p" \
+              -an \
               -c:v libx264 \
-              -preset medium \
+              -preset ultrafast \
+              -crf 18 \
+              -r 30 \
+              -fps_mode cfr \
+              -video_track_timescale 15360 \
+              image_prepared.mp4; then
+              echo "Step 2 failed."
+              sleep 5
+              continue
+            fi
+
+            if [ ! -s image_prepared.mp4 ]; then
+              echo "Step 2 produced empty file."
+              sleep 5
+              continue
+            fi
+
+            # ============================================================
+            # STEP 3: xfade between two CFR MP4 files
+            # ============================================================
+            echo "--- Step 3: Applying xfade ---"
+
+            rm -f montage_video.mp4
+
+            if ! ffmpeg -y \
+              -i intro_prepared.mp4 \
+              -i image_prepared.mp4 \
+              -filter_complex "[0:v][1:v]xfade=transition=fade:duration=1:offset=8[v]" \
+              -map "[v]" \
+              -an \
+              -c:v libx264 \
+              -preset veryfast \
               -crf 18 \
               -pix_fmt yuv420p \
               -r 30 \
               -fps_mode cfr \
+              montage_video.mp4; then
+              echo "Step 3 failed."
+              sleep 5
+              continue
+            fi
+
+            if [ ! -s montage_video.mp4 ]; then
+              echo "Step 3 produced empty file."
+              sleep 5
+              continue
+            fi
+
+            # ============================================================
+            # STEP 4: Mux with audio
+            # ============================================================
+            echo "--- Step 4: Adding audio ---"
+
+            rm -f montage.mp4
+
+            if ! ffmpeg -y \
+              -i montage_video.mp4 \
+              -i audio.ogg \
+              -map 0:v \
+              -map 1:a \
+              -c:v copy \
               -c:a aac \
               -b:a 192k \
               -shortest \
               -movflags +faststart \
               montage.mp4; then
-
-              if [ -s montage.mp4 ]; then
-
-                echo ""
-                echo "Montage created successfully."
-
-                SUCCESS=1
-                break
-              fi
-
-            else
-              echo "FFmpeg montage failed."
-            fi
-
-            if [ "$i" -lt 5 ]; then
-              echo "Waiting 5 seconds..."
+              echo "Step 4 failed."
               sleep 5
+              continue
             fi
+
+            if [ -s montage.mp4 ]; then
+
+              echo ""
+              echo "Montage created successfully."
+
+              SUCCESS=1
+              break
+            fi
+
+            echo "Montage failed."
+            echo "Waiting 5 seconds..."
+            sleep 5
 
           done
 
