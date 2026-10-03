@@ -755,11 +755,11 @@ jobs:
       # ==========================================================
       # ADD WAVEFORM
       #
-      # IMPORTANT:
-      # The audio file may be much longer than the montage video.
-      # We trim the audio to the montage duration before running
-      # showwaves so that FFmpeg does not try to render a full
-      # waveform for the entire audio track.
+      # Notes:
+      # - The audio file may be much longer than the montage video.
+      #   We trim audio to the montage duration before showwaves.
+      # - Waveform color: white
+      # - Background box: black with 55% opacity, visible only after t=13
       # ==========================================================
 
       - name: Add waveform
@@ -853,7 +853,7 @@ jobs:
           BOX_H=$((H + PAD_Y * 2))
 
           # ============================================================
-          # Detect montage duration to limit audio processing
+          # Detect montage duration
           # ============================================================
           MONTAGE_DURATION=$(ffprobe \
             -v error \
@@ -868,7 +868,6 @@ jobs:
             exit 1
           fi
 
-          # Add a small safety margin
           PROCESS_DURATION=$(awk "BEGIN {print $MONTAGE_DURATION + 0.5}")
 
           echo "Processing duration (with margin): $PROCESS_DURATION seconds"
@@ -885,12 +884,12 @@ jobs:
               asetpts=PTS-STARTPTS,
               showwaves=
               s=${W}x${H}:
-              mode=line:
+              mode=cline:
               rate=30:
               scale=lin:
               colors=white,
               format=rgba,
-              colorkey=black:0.01:0.0
+              colorkey=black:0.10:0.05
               [wave];
 
               [0:v]
@@ -899,8 +898,9 @@ jobs:
               y=${BOX_Y}:
               w=${BOX_W}:
               h=${BOX_H}:
-              color=black@0.25:
-              t=fill
+              color=black@0.55:
+              t=fill:
+              enable='gte(t,13)'
               [base];
 
               [base][wave]
