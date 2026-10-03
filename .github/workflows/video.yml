@@ -492,7 +492,7 @@ jobs:
             fi
 
             if [ "$i" -lt 5 ]; then
-              echo "Waiting 5 seconds before retry..."
+              echo "Waiting 5 seconds..."
               sleep 5
             fi
 
@@ -514,7 +514,9 @@ jobs:
 
       # ==========================================
       # Add waveform starting at 13 seconds
-      # Position and size selected by n8n
+      #
+      # White transparent rounded rectangle
+      # Black waveform
       # ==========================================
 
       - name: Add waveform starting at 13s
@@ -611,16 +613,49 @@ jobs:
           esac
 
 
+          # ==========================================
+          # Rectangle settings
+          # ==========================================
+
+          # Extra space around the waveform
+          PADDING_X=18
+          PADDING_Y=16
+
+          # Rounded rectangle size
+          BOX_W=$((WAVE_W + PADDING_X * 2))
+          BOX_H=$((WAVE_H + PADDING_Y * 2))
+
+          # Rectangle position
+          BOX_X=$((WAVE_X - PADDING_X))
+          BOX_Y=$((WAVE_Y - PADDING_Y))
+
+          # Rounded corner radius
+          RADIUS=12
+
+          # White transparency
+          # 0.25 = 25% opacity
+          BOX_ALPHA="0.25"
+
+
           echo ""
           echo "=========================================="
           echo "Selected waveform settings"
           echo "=========================================="
 
           echo "Position: $WAVEFORM_POSITION"
-          echo "X: $WAVE_X"
-          echo "Y: $WAVE_Y"
-          echo "Width: $WAVE_W"
-          echo "Height: $WAVE_H"
+
+          echo "Waveform X: $WAVE_X"
+          echo "Waveform Y: $WAVE_Y"
+          echo "Waveform Width: $WAVE_W"
+          echo "Waveform Height: $WAVE_H"
+
+          echo ""
+          echo "Rectangle X: $BOX_X"
+          echo "Rectangle Y: $BOX_Y"
+          echo "Rectangle Width: $BOX_W"
+          echo "Rectangle Height: $BOX_H"
+          echo "Corner Radius: $RADIUS"
+          echo "Rectangle Opacity: $BOX_ALPHA"
 
           echo "=========================================="
 
@@ -639,15 +674,45 @@ jobs:
             echo "Waveform attempt $i/5"
             echo "=========================================="
 
+
             rm -f output_final.mp4
 
 
             if ffmpeg \
               -y \
               -i output_cropped.mp4 \
-              -filter_complex "\
-              [0:a]compand,showwaves=s=${WAVE_W}x${WAVE_H}:colors=white@1:draw=full:mode=p2p,format=yuva420p[wave]; \
-              [0:v][wave]overlay=x=${WAVE_X}:y=${WAVE_Y}:format=auto:enable='gte(t,13)',format=yuv420p[outv]" \
+              -filter_complex "
+              [0:a]compand,showwaves=s=${WAVE_W}x${WAVE_H}:colors=black@1:draw=full:mode=p2p,format=rgba[wave];
+
+              color=c=white@0:s=${BOX_W}x${BOX_H}:r=25,format=rgba,
+              geq=
+              r='255':
+              g='255':
+              b='255':
+              a='255*${BOX_ALPHA}*if(
+                lte(
+                  max(abs(X-${BOX_W}/2)-(${BOX_W}/2-${RADIUS}),0),
+                  abs(Y-${BOX_H}/2)-(${BOX_H}/2-${RADIUS})
+                ),
+                1,
+                0
+              )'
+              [box];
+
+              [0:v][box]overlay=
+              x=${BOX_X}:
+              y=${BOX_Y}:
+              format=auto:
+              enable='gte(t,13)'
+              [background];
+
+              [background][wave]overlay=
+              x=${WAVE_X}:
+              y=${WAVE_Y}:
+              format=auto:
+              enable='gte(t,13)',
+              format=yuv420p[outv]
+              " \
               -map "[outv]" \
               -map 0:a \
               -c:v libx264 \
@@ -656,6 +721,7 @@ jobs:
 
               if [ -s output_final.mp4 ]; then
 
+                echo ""
                 echo "Waveform processing completed successfully."
 
                 SUCCESS=1
@@ -676,7 +742,7 @@ jobs:
 
 
             if [ "$i" -lt 5 ]; then
-              echo "Waiting 5 seconds before retry..."
+              echo "Waiting 5 seconds..."
               sleep 5
             fi
 
@@ -711,10 +777,6 @@ jobs:
 
           DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
           VIDEO_NAME: ${{ github.event.inputs.video_name }}
-
-          # ==========================================
-          # Webhook URL comes from n8n
-          # ==========================================
 
           N8N_WEBHOOK_URL: ${{ github.event.inputs.webhook_url }}
 
