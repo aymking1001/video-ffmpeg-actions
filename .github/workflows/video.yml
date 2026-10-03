@@ -1,214 +1,441 @@
 name: Video Montage + Waveform + Upload to Google Drive
 
 on:
-workflow_dispatch:
-inputs:
+  workflow_dispatch:
+    inputs:
+      intro_url:
+        description: 'Intro video URL'
+        required: true
+        type: string
 
-  intro_url:
-    description: 'Intro video URL'
-    required: true
-    type: string
+      image_url:
+        description: 'Image URL - 1920x1080'
+        required: true
+        type: string
 
-  image_url:
-    description: 'Image URL - 1920x1080'
-    required: true
-    type: string
+      audio_url:
+        description: 'Audio URL'
+        required: true
+        type: string
 
-  audio_url:
-    description: 'Audio URL'
-    required: true
-    type: string
+      drive_folder_id:
+        description: 'Google Drive folder ID'
+        required: true
+        type: string
 
-  drive_folder_id:
-    description: 'Google Drive folder ID'
-    required: true
-    type: string
+      video_name:
+        description: 'Name for the uploaded video'
+        required: true
+        type: string
 
-  video_name:
-    description: 'Name for the uploaded video'
-    required: true
-    type: string
+      webhook_url:
+        description: 'n8n Webhook URL'
+        required: true
+        type: string
 
-  webhook_url:
-    description: 'n8n Webhook URL'
-    required: true
-    type: string
+      waveform_position:
+        description: 'Waveform position 1-8'
+        required: true
+        type: string
 
-  waveform_position:
-    description: 'Waveform position 1-8'
-    required: true
-    type: string
 
 jobs:
+  process-video:
 
-process-video:
+    runs-on: ubuntu-latest
 
-runs-on: ubuntu-latest
+    outputs:
+      drive_url: ${{ steps.upload.outputs.drive_url }}
+      video_file_id: ${{ steps.upload.outputs.video_file_id }}
 
-outputs:
-  drive_url: ${{ steps.upload.outputs.drive_url }}
-  video_file_id: ${{ steps.upload.outputs.video_file_id }}
+    steps:
 
+      # ==========================================
+      # Install dependencies
+      # ==========================================
 
-steps:
+      - name: Install dependencies
+        run: |
+          set -e
 
-  # ==========================================
-  # Install dependencies
-  # ==========================================
+          echo "=========================================="
+          echo "Installing dependencies"
+          echo "=========================================="
 
-  - name: Install dependencies
+          echo "Updating apt..."
 
-    run: |
-      set -e
+          for i in 1 2 3 4 5; do
+            echo "APT update attempt $i/5"
 
-      echo "=========================================="
-      echo "Installing dependencies"
-      echo "=========================================="
+            if sudo apt update; then
+              echo "APT update succeeded."
+              break
+            fi
 
-      echo "Updating apt..."
+            if [ "$i" -eq 5 ]; then
+              echo "ERROR: apt update failed after 5 attempts."
+              exit 1
+            fi
 
-      for i in 1 2 3 4 5; do
+            echo "Waiting 5 seconds..."
+            sleep 5
+          done
 
-        echo "APT update attempt $i/5"
+          sudo apt install -y \
+            wget \
+            python3 \
+            python3-pip \
+            file
 
-        if sudo apt update; then
-
-          echo "APT update succeeded."
-
-          break
-
-        fi
-
-        if [ "$i" -eq 5 ]; then
-
-          echo "ERROR: apt update failed after 5 attempts."
-
-          exit 1
-
-        fi
-
-        echo "Waiting 5 seconds..."
-
-        sleep 5
-
-      done
-
-
-      sudo apt install -y \
-        wget \
-        python3 \
-        python3-pip \
-        file
-
-
-      python3 -m pip install --user requests --break-system-packages || \
-      python3 -m pip install --user requests
-
-
-  # ==========================================
-  # Install / Download FFmpeg
-  # ==========================================
-
-  - name: Install / Download FFmpeg
-
-    run: |
-      set -e
-
-      echo ""
-      echo "=========================================="
-      echo "Installing FFmpeg"
-      echo "=========================================="
-
-
-      FFMPEG_DIR="$HOME/ffmpeg-bin"
-
-      rm -rf "$FFMPEG_DIR"
-
-      mkdir -p "$FFMPEG_DIR"
-
-
-      SUCCESS=0
+          python3 -m pip install --user requests --break-system-packages || \
+          python3 -m pip install --user requests
 
 
       # ==========================================
-      # SOURCE 1
-      # John Van Sickle
+      # Install / Download FFmpeg
       # ==========================================
 
-      echo ""
-      echo "=========================================="
-      echo "FFmpeg source 1/3"
-      echo "John Van Sickle"
-      echo "=========================================="
+      - name: Install / Download FFmpeg
+        run: |
+          set -e
+
+          echo ""
+          echo "=========================================="
+          echo "Installing FFmpeg"
+          echo "=========================================="
+
+          FFMPEG_DIR="$HOME/ffmpeg-bin"
+
+          rm -rf "$FFMPEG_DIR"
+          mkdir -p "$FFMPEG_DIR"
+
+          SUCCESS=0
 
 
-      URL1="https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz"
+          # ==========================================
+          # SOURCE 1
+          # John Van Sickle
+          # ==========================================
+
+          echo ""
+          echo "=========================================="
+          echo "FFmpeg source 1/3"
+          echo "John Van Sickle"
+          echo "=========================================="
+
+          URL1="https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz"
+
+          rm -f ffmpeg.tar.xz
+
+          for i in 1 2 3; do
+
+            echo ""
+            echo "Attempt $i/3"
+
+            rm -f ffmpeg.tar.xz
+
+            if wget \
+              --timeout=60 \
+              --tries=3 \
+              -O ffmpeg.tar.xz \
+              "$URL1"; then
+
+              echo "wget completed."
+
+              if file ffmpeg.tar.xz | grep -qi "XZ compressed"; then
+
+                echo "Valid XZ archive detected."
+
+                rm -rf ffmpeg-7.0.2-amd64-static
+
+                if tar -xf ffmpeg.tar.xz; then
+
+                  if [ -x "ffmpeg-7.0.2-amd64-static/ffmpeg" ]; then
+
+                    cp \
+                      ffmpeg-7.0.2-amd64-static/ffmpeg \
+                      "$FFMPEG_DIR/ffmpeg"
+
+                    if [ -f "ffmpeg-7.0.2-amd64-static/ffprobe" ]; then
+                      cp \
+                        ffmpeg-7.0.2-amd64-static/ffprobe \
+                        "$FFMPEG_DIR/ffprobe"
+                    fi
+
+                    chmod +x "$FFMPEG_DIR/ffmpeg"
+
+                    if [ -f "$FFMPEG_DIR/ffprobe" ]; then
+                      chmod +x "$FFMPEG_DIR/ffprobe"
+                    fi
+
+                    SUCCESS=1
+
+                    echo "FFmpeg installed from source 1."
+
+                    break
+
+                  fi
+
+                fi
+
+              else
+
+                echo "Downloaded file is not a valid XZ archive."
+                file ffmpeg.tar.xz
+
+              fi
+
+            else
+
+              echo "wget failed."
+
+            fi
+
+            if [ "$i" -lt 3 ]; then
+              echo "Waiting 5 seconds..."
+              sleep 5
+            fi
+
+          done
 
 
-      rm -f ffmpeg.tar.xz
+          # ==========================================
+          # SOURCE 2
+          # BtbN GitHub
+          # ==========================================
+
+          if [ "$SUCCESS" -ne 1 ]; then
+
+            echo ""
+            echo "=========================================="
+            echo "FFmpeg source 2/3"
+            echo "BtbN GitHub"
+            echo "=========================================="
+
+            URL2="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+
+            rm -f ffmpeg.tar.xz
+
+            for i in 1 2 3; do
+
+              echo ""
+              echo "Attempt $i/3"
+
+              rm -f ffmpeg.tar.xz
+
+              if wget \
+                --timeout=60 \
+                --tries=3 \
+                -O ffmpeg.tar.xz \
+                "$URL2"; then
+
+                echo "wget completed."
+
+                if file ffmpeg.tar.xz | grep -qi "XZ compressed"; then
+
+                  echo "Valid XZ archive detected."
+
+                  rm -rf ffmpeg-master-latest-linux64-gpl
+
+                  if tar -xf ffmpeg.tar.xz; then
+
+                    FFMPEG_PATH=$(find . \
+                      -type f \
+                      -name ffmpeg \
+                      -perm -111 \
+                      | head -n 1)
+
+                    FFPROBE_PATH=$(find . \
+                      -type f \
+                      -name ffprobe \
+                      -perm -111 \
+                      | head -n 1)
+
+                    if [ -n "$FFMPEG_PATH" ]; then
+
+                      cp \
+                        "$FFMPEG_PATH" \
+                        "$FFMPEG_DIR/ffmpeg"
+
+                      chmod +x "$FFMPEG_DIR/ffmpeg"
+
+                      if [ -n "$FFPROBE_PATH" ]; then
+
+                        cp \
+                          "$FFPROBE_PATH" \
+                          "$FFMPEG_DIR/ffprobe"
+
+                        chmod +x "$FFMPEG_DIR/ffprobe"
+
+                      fi
+
+                      SUCCESS=1
+
+                      echo "FFmpeg installed from source 2."
+
+                      break
+
+                    fi
+
+                  fi
+
+                else
+
+                  echo "Downloaded file is not a valid XZ archive."
+                  file ffmpeg.tar.xz
+
+                fi
+
+              else
+
+                echo "wget failed."
+
+              fi
+
+              if [ "$i" -lt 3 ]; then
+                echo "Waiting 5 seconds..."
+                sleep 5
+              fi
+
+            done
+
+          fi
 
 
-      for i in 1 2 3; do
+          # ==========================================
+          # SOURCE 3
+          # Ubuntu APT
+          # ==========================================
 
-        echo ""
-        echo "Attempt $i/3"
+          if [ "$SUCCESS" -ne 1 ]; then
 
+            echo ""
+            echo "=========================================="
+            echo "FFmpeg source 3/3"
+            echo "Ubuntu APT"
+            echo "=========================================="
 
-        rm -f ffmpeg.tar.xz
+            for i in 1 2 3; do
 
+              echo ""
+              echo "APT FFmpeg install attempt $i/3"
 
-        if wget \
-          --timeout=60 \
-          --tries=3 \
-          -O ffmpeg.tar.xz \
-          "$URL1"; then
+              if sudo apt install -y ffmpeg; then
 
-
-          echo "wget completed."
-
-
-          if file ffmpeg.tar.xz | grep -qi "XZ compressed"; then
-
-
-            echo "Valid XZ archive detected."
-
-
-            rm -rf ffmpeg-7.0.2-amd64-static
-
-
-            if tar -xf ffmpeg.tar.xz; then
-
-
-              if [ -x "ffmpeg-7.0.2-amd64-static/ffmpeg" ]; then
-
-
-                cp \
-                  ffmpeg-7.0.2-amd64-static/ffmpeg \
-                  "$FFMPEG_DIR/ffmpeg"
-
-
-                if [ -f "ffmpeg-7.0.2-amd64-static/ffprobe" ]; then
+                if command -v ffmpeg >/dev/null 2>&1; then
 
                   cp \
-                    ffmpeg-7.0.2-amd64-static/ffprobe \
-                    "$FFMPEG_DIR/ffprobe"
+                    "$(command -v ffmpeg)" \
+                    "$FFMPEG_DIR/ffmpeg"
+
+                  chmod +x "$FFMPEG_DIR/ffmpeg"
+
+                  if command -v ffprobe >/dev/null 2>&1; then
+
+                    cp \
+                      "$(command -v ffprobe)" \
+                      "$FFMPEG_DIR/ffprobe"
+
+                    chmod +x "$FFMPEG_DIR/ffprobe"
+
+                  fi
+
+                  SUCCESS=1
+
+                  echo "FFmpeg installed from Ubuntu APT."
+
+                  break
 
                 fi
 
+              else
 
-                chmod +x "$FFMPEG_DIR/ffmpeg"
+                echo "APT FFmpeg installation failed."
+
+              fi
+
+              if [ "$i" -lt 3 ]; then
+                echo "Waiting 5 seconds..."
+                sleep 5
+              fi
+
+            done
+
+          fi
 
 
-                if [ -f "$FFMPEG_DIR/ffprobe" ]; then
-                  chmod +x "$FFMPEG_DIR/ffprobe"
-                fi
+          # ==========================================
+          # Final FFmpeg check
+          # ==========================================
 
+          if [ "$SUCCESS" -ne 1 ]; then
+
+            echo ""
+            echo "=========================================="
+            echo "ERROR"
+            echo "=========================================="
+
+            echo "Unable to install FFmpeg."
+
+            exit 1
+
+          fi
+
+          echo "$FFMPEG_DIR" >> "$GITHUB_PATH"
+
+          echo ""
+          echo "=========================================="
+          echo "FFmpeg successfully installed"
+          echo "=========================================="
+
+          "$FFMPEG_DIR/ffmpeg" -version
+
+          echo ""
+          echo "Checking FFprobe..."
+
+          if [ ! -x "$FFMPEG_DIR/ffprobe" ]; then
+            echo "ERROR: ffprobe was not installed."
+            exit 1
+          fi
+
+          "$FFMPEG_DIR/ffprobe" -version
+
+
+      # ==========================================
+      # Download Intro
+      # ==========================================
+
+      - name: Download intro
+        run: |
+          set -e
+
+          INTRO_URL="${{ github.event.inputs.intro_url }}"
+
+          echo ""
+          echo "=========================================="
+          echo "Downloading intro"
+          echo "=========================================="
+
+          SUCCESS=0
+
+          for i in 1 2 3 4 5; do
+
+            echo ""
+            echo "Intro download attempt $i/5"
+
+            rm -f intro.mp4
+
+            if wget \
+              --timeout=60 \
+              --tries=3 \
+              -O intro.mp4 \
+              "$INTRO_URL"; then
+
+              if [ -s intro.mp4 ]; then
+
+                echo "Intro downloaded successfully."
 
                 SUCCESS=1
-
-
-                echo "FFmpeg installed from source 1."
-
 
                 break
 
@@ -216,1207 +443,969 @@ steps:
 
             fi
 
-          else
+            echo "Intro download failed."
 
-            echo "Downloaded file is not a valid XZ archive."
+            if [ "$i" -lt 5 ]; then
+              sleep 10
+            fi
 
-            file ffmpeg.tar.xz
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "ERROR: Intro download failed."
+            exit 1
+          fi
+
+          ls -lh intro.mp4
+
+
+      # ==========================================
+      # Download image
+      # ==========================================
+
+      - name: Download image
+        run: |
+          set -e
+
+          IMAGE_URL="${{ github.event.inputs.image_url }}"
+
+          echo ""
+          echo "=========================================="
+          echo "Downloading image"
+          echo "=========================================="
+
+          SUCCESS=0
+
+          for i in 1 2 3 4 5; do
+
+            echo ""
+            echo "Image download attempt $i/5"
+
+            rm -f image.png
+
+            if wget \
+              --timeout=60 \
+              --tries=3 \
+              -O image.png \
+              "$IMAGE_URL"; then
+
+              if [ -s image.png ]; then
+
+                echo "Image downloaded successfully."
+
+                SUCCESS=1
+
+                break
+
+              fi
+
+            fi
+
+            echo "Image download failed."
+
+            if [ "$i" -lt 5 ]; then
+              sleep 10
+            fi
+
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "ERROR: Image download failed."
+            exit 1
+          fi
+
+          echo ""
+          echo "Image information:"
+
+          ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width,height \
+            -of default=noprint_wrappers=1 \
+            image.png
+
+          ls -lh image.png
+
+
+      # ==========================================
+      # Download audio
+      # ==========================================
+
+      - name: Download audio
+        run: |
+          set -e
+
+          AUDIO_URL="${{ github.event.inputs.audio_url }}"
+
+          echo ""
+          echo "=========================================="
+          echo "Downloading audio"
+          echo "=========================================="
+
+          SUCCESS=0
+
+          for i in 1 2 3 4 5; do
+
+            echo ""
+            echo "Audio download attempt $i/5"
+
+            rm -f audio.ogg
+
+            if wget \
+              --timeout=60 \
+              --tries=3 \
+              -O audio.ogg \
+              "$AUDIO_URL"; then
+
+              if [ -s audio.ogg ]; then
+
+                echo "Audio downloaded successfully."
+
+                SUCCESS=1
+
+                break
+
+              fi
+
+            fi
+
+            echo "Audio download failed."
+
+            if [ "$i" -lt 5 ]; then
+              sleep 10
+            fi
+
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+            echo "ERROR: Audio download failed."
+            exit 1
+          fi
+
+          echo ""
+          echo "Audio information:"
+
+          ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            audio.ogg
+
+          ls -lh audio.ogg
+
+
+      # ==========================================
+      # Detect media durations
+      # ==========================================
+
+      - name: Detect media durations
+        run: |
+          set -e
+
+          INTRO_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            intro.mp4)
+
+          AUDIO_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            audio.ogg)
+
+          IMAGE_WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of default=noprint_wrappers=1:nokey=1 \
+            image.png)
+
+          IMAGE_HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of default=noprint_wrappers=1:nokey=1 \
+            image.png)
+
+          echo ""
+          echo "=========================================="
+          echo "MEDIA INFORMATION"
+          echo "=========================================="
+
+          echo "Intro duration: $INTRO_DURATION"
+          echo "Audio duration: $AUDIO_DURATION"
+          echo "Image width: $IMAGE_WIDTH"
+          echo "Image height: $IMAGE_HEIGHT"
+
+          if [ -z "$INTRO_DURATION" ]; then
+            echo "ERROR: Could not detect intro duration."
+            exit 1
+          fi
+
+          if [ -z "$AUDIO_DURATION" ]; then
+            echo "ERROR: Could not detect audio duration."
+            exit 1
+          fi
+
+          if [ "$IMAGE_WIDTH" != "1920" ] || [ "$IMAGE_HEIGHT" != "1080" ]; then
+
+            echo ""
+            echo "WARNING:"
+            echo "Input image is not 1920x1080."
+            echo "It will be fitted into a 1920x1080 canvas."
 
           fi
 
-        else
-
-          echo "wget failed."
-
-        fi
-
-
-        if [ "$i" -lt 3 ]; then
-
-          echo "Waiting 5 seconds..."
-
-          sleep 5
-
-        fi
-
-      done
+          echo "=========================================="
 
 
       # ==========================================
-      # SOURCE 2
-      # BtbN GitHub
+      # Create montage
       # ==========================================
 
-      if [ "$SUCCESS" -ne 1 ]; then
-
-
-        echo ""
-        echo "=========================================="
-        echo "FFmpeg source 2/3"
-        echo "BtbN GitHub"
-        echo "=========================================="
-
-
-        URL2="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
-
-
-        rm -f ffmpeg.tar.xz
-
-
-        for i in 1 2 3; do
-
+      - name: Create final montage
+        run: |
+          set -e
 
           echo ""
-          echo "Attempt $i/3"
+          echo "=========================================="
+          echo "Creating final montage"
+          echo "=========================================="
 
+          SUCCESS=0
 
-          rm -f ffmpeg.tar.xz
+          for i in 1 2 3 4 5; do
 
+            echo ""
+            echo "Montage attempt $i/5"
 
-          if wget \
-            --timeout=60 \
-            --tries=3 \
-            -O ffmpeg.tar.xz \
-            "$URL2"; then
+            rm -f montage.mp4
 
+            if ffmpeg \
+              -y \
+              -i intro.mp4 \
+              -loop 1 \
+              -i image.png \
+              -i audio.ogg \
+              -filter_complex "
+                [0:v]
+                scale=1920:1080:force_original_aspect_ratio=decrease,
+                pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
+                setsar=1,
+                format=yuv420p,
+                trim=duration=9,
+                setpts=PTS-STARTPTS
+                [intro];
 
-            echo "wget completed."
+                [1:v]
+                scale=1920:1080:force_original_aspect_ratio=decrease,
+                pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
+                setsar=1,
+                format=yuv420p,
+                setpts=PTS-STARTPTS
+                [image];
 
+                [intro][image]
+                xfade=
+                transition=fade:
+                duration=1:
+                offset=8
+                [video]
+              " \
+              -map "[video]" \
+              -map 2:a \
+              -c:v libx264 \
+              -preset medium \
+              -crf 18 \
+              -pix_fmt yuv420p \
+              -c:a aac \
+              -b:a 192k \
+              -shortest \
+              -movflags +faststart \
+              montage.mp4; then
 
-            if file ffmpeg.tar.xz | grep -qi "XZ compressed"; then
+              if [ -s montage.mp4 ]; then
 
+                echo ""
+                echo "Montage created successfully."
 
-              echo "Valid XZ archive detected."
+                SUCCESS=1
 
-
-              rm -rf ffmpeg-master-latest-linux64-gpl
-
-
-              if tar -xf ffmpeg.tar.xz; then
-
-
-                FFMPEG_PATH=$(find . \
-                  -type f \
-                  -name ffmpeg \
-                  -perm -111 \
-                  | head -n 1)
-
-
-                FFPROBE_PATH=$(find . \
-                  -type f \
-                  -name ffprobe \
-                  -perm -111 \
-                  | head -n 1)
-
-
-                if [ -n "$FFMPEG_PATH" ]; then
-
-
-                  cp \
-                    "$FFMPEG_PATH" \
-                    "$FFMPEG_DIR/ffmpeg"
-
-
-                  chmod +x "$FFMPEG_DIR/ffmpeg"
-
-
-                  if [ -n "$FFPROBE_PATH" ]; then
-
-
-                    cp \
-                      "$FFPROBE_PATH" \
-                      "$FFMPEG_DIR/ffprobe"
-
-
-                    chmod +x "$FFMPEG_DIR/ffprobe"
-
-                  fi
-
-
-                  SUCCESS=1
-
-
-                  echo "FFmpeg installed from source 2."
-
-
-                  break
-
-                fi
+                break
 
               fi
 
             else
 
-              echo "Downloaded file is not a valid XZ archive."
-
-              file ffmpeg.tar.xz
+              echo "FFmpeg montage failed."
 
             fi
 
-          else
+            if [ "$i" -lt 5 ]; then
+              echo "Waiting 5 seconds..."
+              sleep 5
+            fi
 
-            echo "wget failed."
+          done
+
+          if [ "$SUCCESS" -ne 1 ]; then
+
+            echo ""
+            echo "ERROR: Montage failed after 5 attempts."
+
+            exit 1
 
           fi
 
+          echo ""
+          echo "Montage information:"
 
-          if [ "$i" -lt 3 ]; then
+          ffprobe \
+            -v error \
+            -show_entries \
+            format=duration \
+            -show_entries \
+            stream=index,codec_name,width,height \
+            -of default=noprint_wrappers=1 \
+            montage.mp4
 
-            echo "Waiting 5 seconds..."
-
-            sleep 5
-
-          fi
-
-        done
-
-      fi
+          ls -lh montage.mp4
 
 
       # ==========================================
-      # SOURCE 3
-      # Ubuntu APT
+      # Add waveform
       # ==========================================
 
-      if [ "$SUCCESS" -ne 1 ]; then
+      - name: Add waveform starting at 13s
+        env:
+          WAVEFORM_POSITION: ${{ github.event.inputs.waveform_position }}
+
+        run: |
+          set -e
+
+          echo ""
+          echo "=========================================="
+          echo "Adding waveform"
+          echo "=========================================="
+
+          echo "Waveform position: $WAVEFORM_POSITION"
 
 
-        echo ""
-        echo "=========================================="
-        echo "FFmpeg source 3/3"
-        echo "Ubuntu APT"
-        echo "=========================================="
+          # ==========================================
+          # Waveform positions
+          # ==========================================
+
+          case "$WAVEFORM_POSITION" in
+
+            1)
+              WAVE_X=1065
+              WAVE_Y=533
+              WAVE_W=776
+              WAVE_H=13
+              ;;
+
+            2)
+              WAVE_X=332
+              WAVE_Y=112
+              WAVE_W=1256
+              WAVE_H=13
+              ;;
+
+            3)
+              WAVE_X=179
+              WAVE_Y=654
+              WAVE_W=1563
+              WAVE_H=13
+              ;;
+
+            4)
+              WAVE_X=90
+              WAVE_Y=534
+              WAVE_W=614
+              WAVE_H=13
+              ;;
+
+            5)
+              WAVE_X=309
+              WAVE_Y=346
+              WAVE_W=1302
+              WAVE_H=13
+              ;;
+
+            6)
+              WAVE_X=176
+              WAVE_Y=732
+              WAVE_W=1569
+              WAVE_H=13
+              ;;
+
+            7)
+              WAVE_X=277
+              WAVE_Y=230
+              WAVE_W=1132
+              WAVE_H=13
+              ;;
+
+            8)
+              WAVE_X=444
+              WAVE_Y=850
+              WAVE_W=1353
+              WAVE_H=13
+              ;;
+
+            *)
+              echo ""
+              echo "ERROR: Invalid waveform position."
+              echo "Allowed values: 1,2,3,4,5,6,7,8"
+              exit 1
+              ;;
+
+          esac
 
 
-        for i in 1 2 3; do
+          # ==========================================
+          # Rectangle settings
+          # ==========================================
+
+          PADDING_X=18
+          PADDING_Y=16
+
+          BOX_W=$((WAVE_W + PADDING_X * 2))
+          BOX_H=$((WAVE_H + PADDING_Y * 2))
+
+          BOX_X=$((WAVE_X - PADDING_X))
+          BOX_Y=$((WAVE_Y - PADDING_Y))
+
+          RADIUS=12
+
+          BOX_ALPHA="0.25"
 
 
           echo ""
-          echo "APT FFmpeg install attempt $i/3"
+          echo "=========================================="
+          echo "WAVEFORM SETTINGS"
+          echo "=========================================="
+
+          echo "Position: $WAVEFORM_POSITION"
+
+          echo "Waveform X: $WAVE_X"
+          echo "Waveform Y: $WAVE_Y"
+          echo "Waveform Width: $WAVE_W"
+          echo "Waveform Height: $WAVE_H"
+
+          echo ""
+          echo "Rectangle X: $BOX_X"
+          echo "Rectangle Y: $BOX_Y"
+          echo "Rectangle Width: $BOX_W"
+          echo "Rectangle Height: $BOX_H"
+
+          echo ""
+          echo "Waveform starts: 13 seconds"
+
+          echo "=========================================="
 
 
-          if sudo apt install -y ffmpeg; then
+          SUCCESS=0
 
 
-            if command -v ffmpeg >/dev/null 2>&1; then
+          # ==========================================
+          # Waveform rendering
+          # ==========================================
 
+          for i in 1 2 3 4 5; do
 
-              cp \
-                "$(command -v ffmpeg)" \
-                "$FFMPEG_DIR/ffmpeg"
+            echo ""
+            echo "Waveform attempt $i/5"
 
+            rm -f output_final.mp4
 
-              chmod +x "$FFMPEG_DIR/ffmpeg"
+            if ffmpeg \
+              -y \
+              -i montage.mp4 \
+              -filter_complex "
+                [0:a]
+                compand,
+                showwaves=
+                s=${WAVE_W}x${WAVE_H}:
+                colors=black@1:
+                draw=full:
+                mode=p2p,
+                format=rgba,
+                setpts=PTS-STARTPTS
+                [wave];
 
+                color=
+                c=white@0:
+                s=${BOX_W}x${BOX_H}:
+                r=25,
+                format=rgba,
+                geq=
+                r='255':
+                g='255':
+                b='255':
+                a='255*${BOX_ALPHA}*if(
+                  lte(
+                    max(
+                      abs(X-${BOX_W}/2)-(${BOX_W}/2-${RADIUS}),
+                      0
+                    ),
+                    abs(Y-${BOX_H}/2)-(${BOX_H}/2-${RADIUS})
+                  ),
+                  1,
+                  0
+                )
+                [box];
 
-              if command -v ffprobe >/dev/null 2>&1; then
+                [0:v][box]
+                overlay=
+                x=${BOX_X}:
+                y=${BOX_Y}:
+                format=auto:
+                enable='gte(t,13)'
+                [background];
 
+                [background][wave]
+                overlay=
+                x=${WAVE_X}:
+                y=${WAVE_Y}:
+                format=auto:
+                enable='gte(t,13)',
+                format=yuv420p
+                [outv]
+              " \
+              -map "[outv]" \
+              -map 0:a \
+              -c:v libx264 \
+              -preset medium \
+              -crf 18 \
+              -pix_fmt yuv420p \
+              -c:a copy \
+              -movflags +faststart \
+              output_final.mp4; then
 
-                cp \
-                  "$(command -v ffprobe)" \
-                  "$FFMPEG_DIR/ffprobe"
+              if [ -s output_final.mp4 ]; then
 
+                echo ""
+                echo "Waveform added successfully."
 
-                chmod +x "$FFMPEG_DIR/ffprobe"
+                SUCCESS=1
+
+                break
 
               fi
 
+            else
 
-              SUCCESS=1
-
-
-              echo "FFmpeg installed from Ubuntu APT."
-
-
-              break
+              echo "FFmpeg waveform processing failed."
 
             fi
 
-          else
+            if [ "$i" -lt 5 ]; then
+              echo "Waiting 5 seconds..."
+              sleep 5
+            fi
 
-            echo "APT FFmpeg installation failed."
+          done
 
-          fi
 
-
-          if [ "$i" -lt 3 ]; then
-
-            echo "Waiting 5 seconds..."
-
-            sleep 5
-
-          fi
-
-        done
-
-      fi
-
-
-      # ==========================================
-      # Final FFmpeg check
-      # ==========================================
-
-      if [ "$SUCCESS" -ne 1 ]; then
-
-        echo ""
-        echo "=========================================="
-        echo "ERROR"
-        echo "=========================================="
-
-        echo "Unable to install FFmpeg."
-
-        exit 1
-
-      fi
-
-
-      echo "$FFMPEG_DIR" >> "$GITHUB_PATH"
-
-
-      echo ""
-      echo "=========================================="
-      echo "FFmpeg successfully installed"
-      echo "=========================================="
-
-
-      "$FFMPEG_DIR/ffmpeg" -version
-
-
-      echo ""
-      echo "Checking FFprobe..."
-
-
-      if [ ! -x "$FFMPEG_DIR/ffprobe" ]; then
-
-        echo "ERROR: ffprobe was not installed."
-
-        exit 1
-
-      fi
-
-
-      "$FFMPEG_DIR/ffprobe" -version
-
-
-  # ==========================================
-  # Download Intro
-  # ==========================================
-
-  - name: Download intro
-
-    run: |
-      set -e
-
-      INTRO_URL="${{ github.event.inputs.intro_url }}"
-
-
-      echo ""
-      echo "=========================================="
-      echo "Downloading intro"
-      echo "=========================================="
-
-
-      SUCCESS=0
-
-
-      for i in 1 2 3 4 5; do
-
-
-        echo ""
-        echo "Intro download attempt $i/5"
-
-
-        rm -f intro.mp4
-
-
-        if wget \
-          --timeout=60 \
-          --tries=3 \
-          -O intro.mp4 \
-          "$INTRO_URL"; then
-
-
-          if [ -s intro.mp4 ]; then
-
-            echo "Intro downloaded successfully."
-
-            SUCCESS=1
-
-            break
-
-          fi
-
-        fi
-
-
-        echo "Intro download failed."
-
-
-        if [ "$i" -lt 5 ]; then
-
-          sleep 10
-
-        fi
-
-      done
-
-
-      if [ "$SUCCESS" -ne 1 ]; then
-
-        echo "ERROR: Intro download failed."
-
-        exit 1
-
-      fi
-
-
-      ls -lh intro.mp4
-
-
-  # ==========================================
-  # Download image
-  # ==========================================
-
-  - name: Download image
-
-    run: |
-      set -e
-
-      IMAGE_URL="${{ github.event.inputs.image_url }}"
-
-
-      echo ""
-      echo "=========================================="
-      echo "Downloading image"
-      echo "=========================================="
-
-
-      SUCCESS=0
-
-
-      for i in 1 2 3 4 5; do
-
-
-        echo ""
-        echo "Image download attempt $i/5"
-
-
-        rm -f image.png
-
-
-        if wget \
-          --timeout=60 \
-          --tries=3 \
-          -O image.png \
-          "$IMAGE_URL"; then
-
-
-          if [ -s image.png ]; then
-
-            echo "Image downloaded successfully."
-
-            SUCCESS=1
-
-            break
-
-          fi
-
-        fi
-
-
-        echo "Image download failed."
-
-
-        if [ "$i" -lt 5 ]; then
-
-          sleep 10
-
-        fi
-
-      done
-
-
-      if [ "$SUCCESS" -ne 1 ]; then
-
-        echo "ERROR: Image download failed."
-
-        exit 1
-
-      fi
-
-
-      echo ""
-      echo "Image information:"
-
-
-      ffprobe \
-        -v error \
-        -select_streams v:0 \
-        -show_entries stream=width,height \
-        -of default=noprint_wrappers=1 \
-        image.png
-
-
-      ls -lh image.png
-
-
-  # ==========================================
-  # Download audio
-  # ==========================================
-
-  - name: Download audio
-
-    run: |
-      set -e
-
-      AUDIO_URL="${{ github.event.inputs.audio_url }}"
-
-
-      echo ""
-      echo "=========================================="
-      echo "Downloading audio"
-      echo "=========================================="
-
-
-      SUCCESS=0
-
-
-      for i in 1 2 3 4 5; do
-
-
-        echo ""
-        echo "Audio download attempt $i/5"
-
-
-        rm -f audio.ogg
-
-
-        if wget \
-          --timeout=60 \
-          --tries=3 \
-          -O audio.ogg \
-          "$AUDIO_URL"; then
-
-
-          if [ -s audio.ogg ]; then
-
-            echo "Audio downloaded successfully."
-
-            SUCCESS=1
-
-            break
-
-          fi
-
-        fi
-
-
-        echo "Audio download failed."
-
-
-        if [ "$i" -lt 5 ]; then
-
-          sleep 10
-
-        fi
-
-      done
-
-
-      if [ "$SUCCESS" -ne 1 ]; then
-
-        echo "ERROR: Audio download failed."
-
-        exit 1
-
-      fi
-
-
-      echo ""
-      echo "Audio information:"
-
-
-      ffprobe \
-        -v error \
-        -show_entries format=duration \
-        -of default=noprint_wrappers=1:nokey=1 \
-        audio.ogg
-
-
-      ls -lh audio.ogg
-
-
-  # ==========================================
-  # Detect durations
-  # ==========================================
-
-  - name: Detect media durations
-
-    run: |
-      set -e
-
-
-      INTRO_DURATION=$(ffprobe \
-        -v error \
-        -show_entries format=duration \
-        -of default=noprint_wrappers=1:nokey=1 \
-        intro.mp4)
-
-
-      AUDIO_DURATION=$(ffprobe \
-        -v error \
-        -show_entries format=duration \
-        -of default=noprint_wrappers=1:nokey=1 \
-        audio.ogg)
-
-
-      IMAGE_WIDTH=$(ffprobe \
-        -v error \
-        -select_streams v:0 \
-        -show_entries stream=width \
-        -of default=noprint_wrappers=1:nokey=1 \
-        image.png)
-
-
-      IMAGE_HEIGHT=$(ffprobe \
-        -v error \
-        -select_streams v:0 \
-        -show_entries stream=height \
-        -of default=noprint_wrappers=1:nokey=1 \
-        image.png)
-
-
-      echo ""
-      echo "=========================================="
-      echo "MEDIA INFORMATION"
-      echo "=========================================="
-
-
-      echo "Intro duration: $INTRO_DURATION"
-      echo "Audio duration: $AUDIO_DURATION"
-      echo "Image width: $IMAGE_WIDTH"
-      echo "Image height: $IMAGE_HEIGHT"
-
-
-      if [ -z "$INTRO_DURATION" ]; then
-
-        echo "ERROR: Could not detect intro duration."
-
-        exit 1
-
-      fi
-
-
-      if [ -z "$AUDIO_DURATION" ]; then
-
-        echo "ERROR: Could not detect audio duration."
-
-        exit 1
-
-      fi
-
-
-      if [ "$IMAGE_WIDTH" != "1920" ] || [ "$IMAGE_HEIGHT" != "1080" ]; then
-
-        echo ""
-        echo "WARNING:"
-        echo "Input image is not 1920x1080."
-
-        echo "It will be fitted into a 1920x1080 canvas."
-
-      fi
-
-
-      echo "=========================================="
-
-
-  # ==========================================
-  # Create montage
-  #
-  # Final resolution:
-  # 1920x1080
-  #
-  # Intro:
-  # 9 seconds
-  #
-  # Fade:
-  # 1 second
-  #
-  # Image:
-  # Starts at second 8
-  #
-  # Audio:
-  # Full audio duration
-  # ==========================================
-
-  - name: Create final montage
-
-    run: |
-      set -e
-
-
-      echo ""
-      echo "=========================================="
-      echo "Creating final montage"
-      echo "=========================================="
-
-
-      SUCCESS=0
-
-
-      for i in 1 2 3 4 5; do
-
-
-        echo ""
-        echo "Montage attempt $i/5"
-
-
-        rm -f montage.mp4
-
-
-        if ffmpeg \
-          -y \
-          -i intro.mp4 \
-          -loop 1 \
-          -i image.png \
-          -i audio.ogg \
-          -filter_complex "
-
-          [0:v]
-          scale=1920:1080:force_original_aspect_ratio=decrease,
-          pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
-          setsar=1,
-          format=yuv420p,
-          trim=duration=9,
-          setpts=PTS-STARTPTS
-          [intro];
-
-          [1:v]
-          scale=1920:1080:force_original_aspect_ratio=decrease,
-          pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
-          setsar=1,
-          format=yuv420p,
-          setpts=PTS-STARTPTS
-          [image];
-
-          [intro][image]
-          xfade=
-          transition=fade:
-          duration=1:
-          offset=8
-          [video]
-          " \
-          -map "[video]" \
-          -map 2:a \
-          -c:v libx264 \
-          -preset medium \
-          -crf 18 \
-          -pix_fmt yuv420p \
-          -c:a aac \
-          -b:a 192k \
-          -shortest \
-          -movflags +faststart \
-          montage.mp4; then
-
-
-          if [ -s montage.mp4 ]; then
+          if [ "$SUCCESS" -ne 1 ]; then
 
             echo ""
-            echo "Montage created successfully."
+            echo "ERROR: Waveform processing failed after 5 attempts."
 
-            SUCCESS=1
-
-            break
+            exit 1
 
           fi
 
-        else
 
-          echo "FFmpeg montage failed."
+          # ==========================================
+          # Final validation
+          # ==========================================
 
-        fi
-
-
-        if [ "$i" -lt 5 ]; then
-
-          echo "Waiting 5 seconds..."
-
-          sleep 5
-
-        fi
-
-      done
-
-
-      if [ "$SUCCESS" -ne 1 ]; then
-
-        echo ""
-        echo "ERROR: Montage failed after 5 attempts."
-
-        exit 1
-
-      fi
-
-
-      echo ""
-      echo "Montage information:"
-
-
-      ffprobe \
-        -v error \
-        -show_entries \
-        format=duration \
-        -show_entries \
-        stream=index,codec_name,width,height \
-        -of default=noprint_wrappers=1 \
-        montage.mp4
-
-
-      ls -lh montage.mp4
-
-
-  # ==========================================
-  # Add waveform
-  #
-  # Waveform starts at 13 seconds
-  #
-  # Position selected by:
-  # waveform_position = 1-8
-  # ==========================================
-
-  - name: Add waveform starting at 13s
-
-    env:
-      WAVEFORM_POSITION: ${{ github.event.inputs.waveform_position }}
-
-    run: |
-      set -e
-
-
-      echo ""
-      echo "=========================================="
-      echo "Adding waveform"
-      echo "=========================================="
-
-
-      echo "Waveform position: $WAVEFORM_POSITION"
-
-
-      # ==========================================
-      # Validate waveform position
-      # ==========================================
-
-      case "$WAVEFORM_POSITION" in
-
-        1)
-          WAVE_X=1065
-          WAVE_Y=533
-          WAVE_W=776
-          WAVE_H=13
-          ;;
-
-        2)
-          WAVE_X=332
-          WAVE_Y=112
-          WAVE_W=1256
-          WAVE_H=13
-          ;;
-
-        3)
-          WAVE_X=179
-          WAVE_Y=654
-          WAVE_W=1563
-          WAVE_H=13
-          ;;
-
-        4)
-          WAVE_X=90
-          WAVE_Y=534
-          WAVE_W=614
-          WAVE_H=13
-          ;;
-
-        5)
-          WAVE_X=309
-          WAVE_Y=346
-          WAVE_W=1302
-          WAVE_H=13
-          ;;
-
-        6)
-          WAVE_X=176
-          WAVE_Y=732
-          WAVE_W=1569
-          WAVE_H=13
-          ;;
-
-        7)
-          WAVE_X=277
-          WAVE_Y=230
-          WAVE_W=1132
-          WAVE_H=13
-          ;;
-
-        8)
-          WAVE_X=444
-          WAVE_Y=850
-          WAVE_W=1353
-          WAVE_H=13
-          ;;
-
-        *)
           echo ""
-          echo "ERROR: Invalid waveform position."
+          echo "=========================================="
+          echo "FINAL VIDEO INFORMATION"
+          echo "=========================================="
 
-          echo "Allowed values: 1,2,3,4,5,6,7,8"
+          FINAL_WIDTH=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=width \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output_final.mp4)
 
-          exit 1
-          ;;
+          FINAL_HEIGHT=$(ffprobe \
+            -v error \
+            -select_streams v:0 \
+            -show_entries stream=height \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output_final.mp4)
 
-      esac
+          FINAL_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output_final.mp4)
 
+          echo "Final width: $FINAL_WIDTH"
+          echo "Final height: $FINAL_HEIGHT"
+          echo "Final duration: $FINAL_DURATION seconds"
 
-      # ==========================================
-      # Rectangle settings
-      # ==========================================
-
-      PADDING_X=18
-      PADDING_Y=16
-
-      BOX_W=$((WAVE_W + PADDING_X * 2))
-      BOX_H=$((WAVE_H + PADDING_Y * 2))
-
-      BOX_X=$((WAVE_X - PADDING_X))
-      BOX_Y=$((WAVE_Y - PADDING_Y))
-
-      RADIUS=12
-
-      BOX_ALPHA="0.25"
-
-
-      echo ""
-      echo "=========================================="
-      echo "WAVEFORM SETTINGS"
-      echo "=========================================="
-
-
-      echo "Position: $WAVEFORM_POSITION"
-
-      echo "Waveform X: $WAVE_X"
-      echo "Waveform Y: $WAVE_Y"
-      echo "Waveform Width: $WAVE_W"
-      echo "Waveform Height: $WAVE_H"
-
-      echo ""
-      echo "Rectangle X: $BOX_X"
-      echo "Rectangle Y: $BOX_Y"
-      echo "Rectangle Width: $BOX_W"
-      echo "Rectangle Height: $BOX_H"
-
-      echo ""
-      echo "Waveform starts: 13 seconds"
-
-      echo "=========================================="
-
-
-      SUCCESS=0
-
-
-      # ==========================================
-      # Waveform rendering
-      # ==========================================
-
-      for i in 1 2 3 4 5; do
-
-
-        echo ""
-        echo "Waveform attempt $i/5"
-
-
-        rm -f output_final.mp4
-
-
-        if ffmpeg \
-          -y \
-          -i montage.mp4 \
-          -filter_complex "
-
-          [0:a]
-          compand,
-          showwaves=
-          s=${WAVE_W}x${WAVE_H}:
-          colors=black@1:
-          draw=full:
-          mode=p2p,
-          format=rgba,
-          setpts=PTS-STARTPTS
-          [wave];
-
-          color=
-          c=white@0:
-          s=${BOX_W}x${BOX_H}:
-          r=25,
-          format=rgba,
-          geq=
-          r='255':
-          g='255':
-          b='255':
-          a='255*${BOX_ALPHA}*if(
-            lte(
-              max(
-                abs(X-${BOX_W}/2)-(${BOX_W}/2-${RADIUS}),
-                0
-              ),
-              abs(Y-${BOX_H}/2)-(${BOX_H}/2-${RADIUS})
-            ),
-            1,
-            0
-          )
-          [box];
-
-          [0:v][box]
-          overlay=
-          x=${BOX_X}:
-          y=${BOX_Y}:
-          format=auto:
-          enable='gte(t,13)'
-          [background];
-
-          [background][wave]
-          overlay=
-          x=${WAVE_X}:
-          y=${WAVE_Y}:
-          format=auto:
-          enable='gte(t,13)',
-          format=yuv420p
-          [outv]
-
-          " \
-          -map "[outv]" \
-          -map 0:a \
-          -c:v libx264 \
-          -preset medium \
-          -crf 18 \
-          -pix_fmt yuv420p \
-          -c:a copy \
-          -movflags +faststart \
-          output_final.mp4; then
-
-
-          if [ -s output_final.mp4 ]; then
-
-            echo ""
-            echo "Waveform added successfully."
-
-            SUCCESS=1
-
-            break
-
+          if [ "$FINAL_WIDTH" != "1920" ]; then
+            echo "ERROR: Final width is not 1920."
+            exit 1
           fi
 
-        else
+          if [ "$FINAL_HEIGHT" != "1080" ]; then
+            echo "ERROR: Final height is not 1080."
+            exit 1
+          fi
 
-          echo "FFmpeg waveform processing failed."
+          echo ""
+          echo "Final video:"
 
-        fi
+          ls -lh output_final.mp4
 
-
-        if [ "$i" -lt 5 ]; then
-
-          echo "Waiting 5 seconds..."
-
-          sleep 5
-
-        fi
-
-      done
-
-
-      if [ "$SUCCESS" -ne 1 ]; then
-
-        echo ""
-        echo "ERROR: Waveform processing failed after 5 attempts."
-
-        exit 1
-
-      fi
+          echo ""
+          echo "=========================================="
+          echo "FINAL VIDEO READY"
+          echo "=========================================="
 
 
       # ==========================================
-      # Final validation
+      # Upload to Google Drive
       # ==========================================
 
-      echo ""
-      echo "=========================================="
-      echo "FINAL VIDEO INFORMATION"
-      echo "=========================================="
+      - name: Upload to Google Drive
+        id: upload
 
+        env:
+          CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
 
-      FINAL_WIDTH=$(ffprobe \
-        -v error \
-        -select_streams v:0 \
-        -show_entries stream=width \
-        -of default=noprint_wrappers=1:nokey=1 \
-        output_final.mp4)
+          DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
+          VIDEO_NAME: ${{ github.event.inputs.video_name }}
+          N8N_WEBHOOK_URL: ${{ github.event.inputs.webhook_url }}
 
+        run: |
 
-      FINAL_HEIGHT=$(ffprobe \
-        -v error \
-        -select_streams v:0 \
-        -show_entries stream=height \
-        -of default=noprint_wrappers=1:nokey=1 \
-        output_final.mp4)
+          python3 <<'EOF'
 
+          import os
+          import requests
+          import json
+          import sys
+          import time
 
-      FINAL_DURATION=$(ffprobe \
-        -v error \
-        -show_entries format=duration \
-        -of default=noprint_wrappers=1:nokey=1 \
-        output_final.mp4)
 
+          # ==========================================
+          # Environment variables
+          # ==========================================
 
-      echo "Final width: $FINAL_WIDTH"
-      echo "Final height: $FINAL_HEIGHT"
-      echo "Final duration: $FINAL_DURATION seconds"
+          client_id = os.environ["CLIENT_ID"]
+          client_secret = os.environ["CLIENT_SECRET"]
+          refresh_token = os.environ["REFRESH_TOKEN"]
 
+          folder_id = os.environ["DRIVE_FOLDER_ID"]
+          video_name = os.environ["VIDEO_NAME"]
+          webhook_url = os.environ["N8N_WEBHOOK_URL"]
 
-      if [ "$FINAL_WIDTH" != "1920" ]; then
 
-        echo "ERROR: Final width is not 1920."
+          # ==========================================
+          # Validate variables
+          # ==========================================
 
-        exit 1
+          if not client_id:
+              print("ERROR: GOOGLE_CLIENT_ID is empty.")
+              sys.exit(1)
 
-      fi
+          if not client_secret:
+              print("ERROR: GOOGLE_CLIENT_SECRET is empty.")
+              sys.exit(1)
 
+          if not refresh_token:
+              print("ERROR: GOOGLE_REFRESH_TOKEN is empty.")
+              sys.exit(1)
 
-      if [ "$FINAL_HEIGHT" != "1080" ]; then
+          if not folder_id:
+              print("ERROR: DRIVE_FOLDER_ID is empty.")
+              sys.exit(1)
 
-        echo "ERROR: Final height is not 1080."
+          if not video_name:
+              print("ERROR: VIDEO_NAME is empty.")
+              sys.exit(1)
 
-        exit 1
+          if not webhook_url:
+              print("ERROR: N8N_WEBHOOK_URL is empty.")
+              sys.exit(1)
 
-      fi
 
+          print("All required variables received successfully.")
 
-      echo ""
-      echo "Final video:"
 
+          # ==========================================
+          # Retry helper
+          # ==========================================
 
-      ls -lh output_final.mp4
+          def request_with_retry(
+              method,
+              url,
+              max_attempts=5,
+              **kwargs
+          ):
 
+              last_response = None
 
-      echo ""
-      echo "=========================================="
-      echo "FINAL VIDEO READY"
-      echo "=========================================="
+              for attempt in range(1, max_attempts + 1):
 
+                  print("")
+                  print("==========================================")
 
-  # ==========================================
-  # Upload to Google Drive
-  # ==========================================
+                  print(
+                      f"{method} attempt "
+                      f"{attempt}/{max_attempts}"
+                  )
 
-  - name: Upload to Google Drive
+                  print("==========================================")
 
-    id: upload
+                  try:
 
-    env:
+                      response = requests.request(
+                          method,
+                          url,
+                          **kwargs
+                      )
 
-      CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+                      last_response = response
 
-      CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+                      print(
+                          "HTTP status:",
+                          response.status_code
+                      )
 
-      REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+                      if 200 <= response.status_code < 300:
+                          return response
 
-      DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
+                      print(
+                          "Request failed:",
+                          response.text[:1000]
+                      )
 
-      VIDEO_NAME: ${{ github.event.inputs.video_name }}
+                  except Exception as e:
 
-      N8N_WEBHOOK_URL: ${{ github.event.inputs.webhook_url }}
+                      print(
+                          "Request exception:",
+                          str(e)
+                      )
 
+                  if attempt < max_attempts:
 
-    run: |
+                      wait_time = attempt * 5
 
-      python3 <<'EOF'
+                      print(
+                          f"Waiting {wait_time} seconds..."
+                      )
 
-      import os
-      import requests
-      import json
-      import sys
-      import time
+                      time.sleep(wait_time)
 
+              return last_response
 
-      # ==========================================
-      # Environment variables
-      # ==========================================
 
-      client_id = os.environ["CLIENT_ID"]
+          # ==========================================
+          # Google OAuth
+          # ==========================================
 
-      client_secret = os.environ["CLIENT_SECRET"]
+          print("")
+          print("Getting Google access token...")
 
-      refresh_token = os.environ["REFRESH_TOKEN"]
 
-      folder_id = os.environ["DRIVE_FOLDER_ID"]
+          token_resp = request_with_retry(
 
-      video_name = os.environ["VIDEO_NAME"]
+              "POST",
 
-      webhook_url = os.environ["N8N_WEBHOOK_URL"]
+              "https://oauth2.googleapis.com/token",
 
+              max_attempts=5,
 
-      # ==========================================
-      # Validate variables
-      # ==========================================
+              data={
+                  "client_id": client_id,
+                  "client_secret": client_secret,
+                  "refresh_token": refresh_token,
+                  "grant_type": "refresh_token"
+              },
 
-      if not client_id:
-          print("ERROR: GOOGLE_CLIENT_ID is empty.")
-          sys.exit(1)
+              timeout=30
 
-      if not client_secret:
-          print("ERROR: GOOGLE_CLIENT_SECRET is empty.")
-          sys.exit(1)
+          )
 
-      if not refresh_token:
-          print("ERROR: GOOGLE_REFRESH_TOKEN is empty.")
-          sys.exit(1)
 
-      if not folder_id:
-          print("ERROR: DRIVE_FOLDER_ID is empty.")
-          sys.exit(1)
+          if (
+              token_resp is None
+              or token_resp.status_code != 200
+          ):
 
-      if not video_name:
-          print("ERROR: VIDEO_NAME is empty.")
-          sys.exit(1)
+              print("Token error:")
 
-      if not webhook_url:
-          print("ERROR: N8N_WEBHOOK_URL is empty.")
-          sys.exit(1)
+              if token_resp is not None:
+                  print(token_resp.text)
 
+              sys.exit(1)
 
-      print("All required variables received successfully.")
 
+          access_token = token_resp.json()["access_token"]
 
-      # ==========================================
-      # Retry helper
-      # ==========================================
 
-      def request_with_retry(
-          method,
-          url,
-          max_attempts=5,
-          **kwargs
-      ):
+          headers = {
+              "Authorization": f"Bearer {access_token}"
+          }
 
-          last_response = None
 
+          print(
+              "Google access token obtained successfully."
+          )
 
-          for attempt in range(1, max_attempts + 1):
 
+          # ==========================================
+          # Search existing files
+          # ==========================================
+
+          print("")
+          print("Searching for existing file...")
+
+
+          search_url = (
+              "https://www.googleapis.com/drive/v3/files"
+              f"?q=name='{video_name}' "
+              f"and '{folder_id}' in parents "
+              "&fields=files(id,name)"
+          )
+
+
+          resp = request_with_retry(
+
+              "GET",
+
+              search_url,
+
+              max_attempts=5,
+
+              headers=headers,
+
+              timeout=30
+
+          )
+
+
+          if (
+              resp is not None
+              and resp.status_code == 200
+          ):
+
+              existing_files = resp.json().get(
+                  "files",
+                  []
+              )
+
+
+              print(
+                  f"Found {len(existing_files)} existing file(s)."
+              )
+
+
+              # ==========================================
+              # Delete existing files
+              # ==========================================
+
+              for existing_file in existing_files:
+
+                  existing_id = existing_file["id"]
+                  existing_name = existing_file["name"]
+
+
+                  delete_url = (
+                      "https://www.googleapis.com/drive/v3/files/"
+                      f"{existing_id}"
+                  )
+
+
+                  del_resp = request_with_retry(
+
+                      "DELETE",
+
+                      delete_url,
+
+                      max_attempts=5,
+
+                      headers=headers,
+
+                      timeout=30
+
+                  )
+
+
+                  if (
+                      del_resp is not None
+                      and del_resp.status_code in [200, 204]
+                  ):
+
+                      print(
+                          f"Deleted existing file: "
+                          f"{existing_name}"
+                      )
+
+                  else:
+
+                      print(
+                          f"Failed to delete "
+                          f"{existing_name}"
+                      )
+
+          else:
+
+              print("Search failed.")
+
+              if resp is not None:
+                  print(
+                      resp.status_code,
+                      resp.text
+                  )
+
+
+          # ==========================================
+          # Prepare metadata
+          # ==========================================
+
+          metadata = {
+
+              "name": video_name,
+
+              "parents": [folder_id]
+
+          }
+
+
+          # ==========================================
+          # Upload video
+          # ==========================================
+
+          print("")
+          print("Uploading video to Google Drive...")
+
+
+          upload_success = False
+          upload_resp = None
+
+
+          for attempt in range(1, 6):
 
               print("")
               print("==========================================")
 
               print(
-                  f"{method} attempt "
-                  f"{attempt}/{max_attempts}"
+                  f"Google Drive upload attempt "
+                  f"{attempt}/5"
               )
 
               print("==========================================")
@@ -1424,42 +1413,256 @@ steps:
 
               try:
 
-                  response = requests.request(
-                      method,
-                      url,
-                      **kwargs
-                  )
+                  with open(
+                      "output_final.mp4",
+                      "rb"
+                  ) as video_file:
+
+                      files = {
+
+                          "metadata": (
+                              "metadata",
+                              json.dumps(metadata),
+                              "application/json"
+                          ),
+
+                          "file": (
+                              "output_final.mp4",
+                              video_file,
+                              "video/mp4"
+                          )
+
+                      }
 
 
-                  last_response = response
+                      upload_resp = requests.post(
+
+                          "https://www.googleapis.com/upload/drive/v3/files"
+                          "?uploadType=multipart",
+
+                          headers=headers,
+
+                          files=files,
+
+                          timeout=1800
+
+                      )
 
 
                   print(
-                      "HTTP status:",
-                      response.status_code
+                      "Google Drive HTTP status:",
+                      upload_resp.status_code
                   )
 
 
-                  if 200 <= response.status_code < 300:
+                  if (
+                      200
+                      <= upload_resp.status_code
+                      < 300
+                  ):
 
-                      return response
+                      upload_success = True
+
+                      break
 
 
                   print(
-                      "Request failed:",
-                      response.text[:1000]
+                      "Upload failed:",
+                      upload_resp.text[:1000]
                   )
 
 
               except Exception as e:
 
                   print(
-                      "Request exception:",
+                      "Upload exception:",
                       str(e)
                   )
 
 
-              if attempt < max_attempts:
+              if attempt < 5:
+
+                  wait_time = attempt * 10
+
+                  print(
+                      f"Waiting {wait_time} seconds..."
+                  )
+
+                  time.sleep(wait_time)
+
+
+          if not upload_success:
+
+              print("")
+
+              print(
+                  "ERROR: Google Drive upload failed "
+                  "after 5 attempts."
+              )
+
+              sys.exit(1)
+
+
+          # ==========================================
+          # Parse response
+          # ==========================================
+
+          try:
+
+              result = upload_resp.json()
+
+          except Exception:
+
+              print(
+                  "Invalid Google Drive response:"
+              )
+
+              print(upload_resp.text)
+
+              sys.exit(1)
+
+
+          print(
+              "Drive response:",
+              result
+          )
+
+
+          # ==========================================
+          # Get file ID
+          # ==========================================
+
+          file_id = result.get("id")
+
+
+          if not file_id:
+
+              print(
+                  "Upload failed - no file ID returned."
+              )
+
+              sys.exit(1)
+
+
+          drive_url = (
+              f"https://drive.google.com/file/d/"
+              f"{file_id}/view"
+          )
+
+
+          print("")
+          print("==========================================")
+          print("UPLOAD SUCCESS")
+          print("==========================================")
+
+
+          print(
+              "Video File ID:",
+              file_id
+          )
+
+
+          print(
+              "Drive URL:",
+              drive_url
+          )
+
+
+          print("==========================================")
+
+
+          # ==========================================
+          # Send result to n8n
+          # ==========================================
+
+          print("")
+          print(
+              "Sending video result to n8n..."
+          )
+
+
+          webhook_payload = {
+
+              "videoFileId": file_id,
+
+              "drive_url": drive_url,
+
+              "video_name": video_name
+
+          }
+
+
+          webhook_headers = {
+
+              "Content-Type": "application/json"
+
+          }
+
+
+          webhook_success = False
+          webhook_resp = None
+
+
+          for attempt in range(1, 6):
+
+              print("")
+              print("==========================================")
+
+              print(
+                  f"n8n webhook attempt "
+                  f"{attempt}/5"
+              )
+
+              print("==========================================")
+
+
+              try:
+
+                  webhook_resp = requests.post(
+
+                      webhook_url,
+
+                      json=webhook_payload,
+
+                      headers=webhook_headers,
+
+                      timeout=60
+
+                  )
+
+
+                  print(
+                      "n8n Webhook HTTP status:",
+                      webhook_resp.status_code
+                  )
+
+
+                  print(
+                      "n8n Webhook response:",
+                      webhook_resp.text[:1000]
+                  )
+
+
+                  if (
+                      200
+                      <= webhook_resp.status_code
+                      < 300
+                  ):
+
+                      webhook_success = True
+
+                      break
+
+
+              except Exception as e:
+
+                  print(
+                      "Webhook exception:",
+                      str(e)
+                  )
+
+
+              if attempt < 5:
 
                   wait_time = attempt * 5
 
@@ -1470,554 +1673,73 @@ steps:
                   time.sleep(wait_time)
 
 
-          return last_response
+          if not webhook_success:
 
+              print("")
 
-      # ==========================================
-      # Google OAuth
-      # ==========================================
+              print(
+                  "ERROR: Failed to send video result "
+                  "to n8n after 5 attempts."
+              )
 
-      print("")
-      print("Getting Google access token...")
-
-
-      token_resp = request_with_retry(
-
-          "POST",
-
-          "https://oauth2.googleapis.com/token",
-
-          max_attempts=5,
-
-          data={
-              "client_id": client_id,
-              "client_secret": client_secret,
-              "refresh_token": refresh_token,
-              "grant_type": "refresh_token"
-          },
-
-          timeout=30
-
-      )
-
-
-      if (
-          token_resp is None
-          or token_resp.status_code != 200
-      ):
-
-          print("Token error:")
-
-          if token_resp is not None:
-
-              print(token_resp.text)
-
-          sys.exit(1)
-
-
-      access_token = token_resp.json()["access_token"]
-
-
-      headers = {
-          "Authorization": f"Bearer {access_token}"
-      }
-
-
-      print(
-          "Google access token obtained successfully."
-      )
-
-
-      # ==========================================
-      # Search existing files
-      # ==========================================
-
-      print("")
-      print("Searching for existing file...")
-
-
-      search_url = (
-          "https://www.googleapis.com/drive/v3/files"
-          f"?q=name='{video_name}' "
-          f"and '{folder_id}' in parents "
-          "&fields=files(id,name)"
-      )
-
-
-      resp = request_with_retry(
-
-          "GET",
-
-          search_url,
-
-          max_attempts=5,
-
-          headers=headers,
-
-          timeout=30
-
-      )
-
-
-      if (
-          resp is not None
-          and resp.status_code == 200
-      ):
-
-
-          existing_files = resp.json().get(
-              "files",
-              []
-          )
-
-
-          print(
-              f"Found {len(existing_files)} existing file(s)."
-          )
+              sys.exit(1)
 
 
           # ==========================================
-          # Delete existing files
+          # GitHub Actions outputs
           # ==========================================
 
-          for existing_file in existing_files:
+          with open(
+              os.environ["GITHUB_OUTPUT"],
+              "a"
+          ) as output_file:
 
-
-              existing_id = existing_file["id"]
-
-              existing_name = existing_file["name"]
-
-
-              delete_url = (
-                  "https://www.googleapis.com/drive/v3/files/"
-                  f"{existing_id}"
+              output_file.write(
+                  f"drive_url={drive_url}\n"
               )
 
-
-              del_resp = request_with_retry(
-
-                  "DELETE",
-
-                  delete_url,
-
-                  max_attempts=5,
-
-                  headers=headers,
-
-                  timeout=30
-
+              output_file.write(
+                  f"video_file_id={file_id}\n"
               )
 
-
-              if (
-                  del_resp is not None
-                  and del_resp.status_code in [200, 204]
-              ):
-
-                  print(
-                      f"Deleted existing file: "
-                      f"{existing_name}"
-                  )
-
-              else:
-
-                  print(
-                      f"Failed to delete "
-                      f"{existing_name}"
-                  )
-
-
-      else:
-
-          print("Search failed.")
-
-          if resp is not None:
-
-              print(
-                  resp.status_code,
-                  resp.text
-              )
-
-
-      # ==========================================
-      # Prepare metadata
-      # ==========================================
-
-      metadata = {
-
-          "name": video_name,
-
-          "parents": [folder_id]
-
-      }
-
-
-      # ==========================================
-      # Upload video
-      # ==========================================
-
-      print("")
-      print("Uploading video to Google Drive...")
-
-
-      upload_success = False
-
-      upload_resp = None
-
-
-      for attempt in range(1, 6):
-
-
-          print("")
-          print("==========================================")
-
-          print(
-              f"Google Drive upload attempt "
-              f"{attempt}/5"
-          )
-
-          print("==========================================")
-
-
-          try:
-
-
-              with open(
-                  "output_final.mp4",
-                  "rb"
-              ) as video_file:
-
-
-                  files = {
-
-                      "metadata": (
-                          "metadata",
-                          json.dumps(metadata),
-                          "application/json"
-                      ),
-
-                      "file": (
-                          "output_final.mp4",
-                          video_file,
-                          "video/mp4"
-                      )
-
-                  }
-
-
-                  upload_resp = requests.post(
-
-                      "https://www.googleapis.com/upload/drive/v3/files"
-                      "?uploadType=multipart",
-
-                      headers=headers,
-
-                      files=files,
-
-                      timeout=1800
-
-                  )
-
-
-              print(
-                  "Google Drive HTTP status:",
-                  upload_resp.status_code
-              )
-
-
-              if (
-                  200
-                  <= upload_resp.status_code
-                  < 300
-              ):
-
-                  upload_success = True
-
-                  break
-
-
-              print(
-                  "Upload failed:",
-                  upload_resp.text[:1000]
-              )
-
-
-          except Exception as e:
-
-              print(
-                  "Upload exception:",
-                  str(e)
-              )
-
-
-          if attempt < 5:
-
-              wait_time = attempt * 10
-
-              print(
-                  f"Waiting {wait_time} seconds..."
-              )
-
-              time.sleep(wait_time)
-
-
-      if not upload_success:
-
-          print("")
-          print(
-              "ERROR: Google Drive upload failed "
-              "after 5 attempts."
-          )
-
-          sys.exit(1)
-
-
-      # ==========================================
-      # Parse response
-      # ==========================================
-
-      try:
-
-          result = upload_resp.json()
-
-      except Exception:
-
-          print(
-              "Invalid Google Drive response:"
-          )
-
-          print(upload_resp.text)
-
-          sys.exit(1)
-
-
-      print(
-          "Drive response:",
-          result
-      )
-
-
-      # ==========================================
-      # Get file ID
-      # ==========================================
-
-      file_id = result.get("id")
-
-
-      if not file_id:
-
-          print(
-              "Upload failed - no file ID returned."
-          )
-
-          sys.exit(1)
-
-
-      drive_url = (
-          f"https://drive.google.com/file/d/"
-          f"{file_id}/view"
-      )
-
-
-      print("")
-      print("==========================================")
-      print("UPLOAD SUCCESS")
-      print("==========================================")
-
-
-      print(
-          "Video File ID:",
-          file_id
-      )
-
-
-      print(
-          "Drive URL:",
-          drive_url
-      )
-
-
-      print("==========================================")
-
-
-      # ==========================================
-      # Send result to n8n
-      # ==========================================
-
-      print("")
-      print(
-          "Sending video result to n8n..."
-      )
-
-
-      webhook_payload = {
-
-          "videoFileId": file_id,
-
-          "drive_url": drive_url,
-
-          "video_name": video_name
-
-      }
-
-
-      webhook_headers = {
-
-          "Content-Type": "application/json"
-
-      }
-
-
-      webhook_success = False
-
-      webhook_resp = None
-
-
-      for attempt in range(1, 6):
-
-
-          print("")
-          print("==========================================")
-
-          print(
-              f"n8n webhook attempt "
-              f"{attempt}/5"
-          )
-
-          print("==========================================")
-
-
-          try:
-
-
-              webhook_resp = requests.post(
-
-                  webhook_url,
-
-                  json=webhook_payload,
-
-                  headers=webhook_headers,
-
-                  timeout=60
-
-              )
-
-
-              print(
-                  "n8n Webhook HTTP status:",
-                  webhook_resp.status_code
-              )
-
-
-              print(
-                  "n8n Webhook response:",
-                  webhook_resp.text[:1000]
-              )
-
-
-              if (
-                  200
-                  <= webhook_resp.status_code
-                  < 300
-              ):
-
-                  webhook_success = True
-
-                  break
-
-
-          except Exception as e:
-
-              print(
-                  "Webhook exception:",
-                  str(e)
-              )
-
-
-          if attempt < 5:
-
-              wait_time = attempt * 5
-
-              print(
-                  f"Waiting {wait_time} seconds..."
-              )
-
-              time.sleep(wait_time)
-
-
-      if not webhook_success:
 
           print("")
 
           print(
-              "ERROR: Failed to send video result "
-              "to n8n after 5 attempts."
+              "Video result successfully sent to n8n."
           )
 
-          sys.exit(1)
+          print(
+              "GitHub outputs created successfully."
+          )
+
+          EOF
 
 
       # ==========================================
-      # GitHub Actions outputs
+      # Complete
       # ==========================================
 
-      with open(
-          os.environ["GITHUB_OUTPUT"],
-          "a"
-      ) as output_file:
+      - name: Complete job
+        run: |
 
+          echo ""
+          echo "=========================================="
+          echo "COMPLETE JOB"
+          echo "=========================================="
 
-          output_file.write(
-              f"drive_url={drive_url}\n"
-          )
+          echo "Video montage: SUCCESS"
 
+          echo "Resolution: 1920x1080"
 
-          output_file.write(
-              f"video_file_id={file_id}\n"
-          )
+          echo "Waveform: SUCCESS"
 
+          echo "Google Drive upload: SUCCESS"
 
-      print("")
+          echo "n8n webhook: SUCCESS"
 
-      print(
-          "Video result successfully sent to n8n."
-      )
+          echo ""
 
+          echo "Workflow completed successfully."
 
-      print(
-          "GitHub outputs created successfully."
-      )
-
-      EOF
-
-
-  # ==========================================
-  # Complete
-  # ==========================================
-
-  - name: Complete job
-
-    run: |
-
-      echo ""
-      echo "=========================================="
-      echo "COMPLETE JOB"
-      echo "=========================================="
-
-
-      echo "Video montage: SUCCESS"
-
-      echo "Resolution: 1920x1080"
-
-      echo "Waveform: SUCCESS"
-
-      echo "Google Drive upload: SUCCESS"
-
-      echo "n8n webhook: SUCCESS"
-
-
-      echo ""
-
-      echo "Workflow completed successfully."
-
-      echo "=========================================="
+          echo "=========================================="
