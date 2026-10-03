@@ -603,8 +603,9 @@ jobs:
             echo "Montage attempt $i/5"
 
             # ============================================================
-            # STEP 1: Prepare intro (trim to 9s, scale, CFR 30fps)
+            # STEP 1: Prepare intro
             # ============================================================
+
             echo "--- Step 1: Preparing intro ---"
 
             rm -f intro_prepared.mp4
@@ -633,8 +634,9 @@ jobs:
             fi
 
             # ============================================================
-            # STEP 2: Prepare image (loop 5s, scale, CFR 30fps)
+            # STEP 2: Prepare image
             # ============================================================
+
             echo "--- Step 2: Preparing image ---"
 
             rm -f image_prepared.mp4
@@ -665,8 +667,9 @@ jobs:
             fi
 
             # ============================================================
-            # STEP 3: xfade between two CFR MP4 files
+            # STEP 3: xfade
             # ============================================================
+
             echo "--- Step 3: Applying xfade ---"
 
             rm -f montage_video.mp4
@@ -696,8 +699,9 @@ jobs:
             fi
 
             # ============================================================
-            # STEP 4: Mux with audio
+            # STEP 4: Add audio
             # ============================================================
+
             echo "--- Step 4: Adding audio ---"
 
             rm -f montage.mp4
@@ -754,12 +758,6 @@ jobs:
 
       # ==========================================================
       # ADD WAVEFORM
-      #
-      # Notes:
-      # - The audio file may be much longer than the montage video.
-      #   We trim audio to the montage duration before showwaves.
-      # - Waveform color: white
-      # - Background box: black with 55% opacity, visible only after t=13
       # ==========================================================
 
       - name: Add waveform
@@ -852,9 +850,10 @@ jobs:
           BOX_W=$((W + PAD_X * 2))
           BOX_H=$((H + PAD_Y * 2))
 
-          # ============================================================
+          # ==========================================================
           # Detect montage duration
-          # ============================================================
+          # ==========================================================
+
           MONTAGE_DURATION=$(ffprobe \
             -v error \
             -show_entries format=duration \
@@ -870,9 +869,13 @@ jobs:
 
           PROCESS_DURATION=$(awk "BEGIN {print $MONTAGE_DURATION + 0.5}")
 
-          echo "Processing duration (with margin): $PROCESS_DURATION seconds"
+          echo "Processing duration: $PROCESS_DURATION seconds"
 
           rm -f output_final.mp4
+
+          # ==========================================================
+          # Create waveform
+          # ==========================================================
 
           ffmpeg \
             -y \
@@ -880,34 +883,36 @@ jobs:
             -i audio.ogg \
             -filter_complex "
               [1:a]
-              atrim=0:${PROCESS_DURATION},
+              atrim=duration=${PROCESS_DURATION},
               asetpts=PTS-STARTPTS,
               showwaves=
-              s=${W}x${H}:
-              mode=cline:
-              rate=30:
-              scale=lin:
-              colors=white,
+                s=${W}x${H}:
+                mode=cline:
+                rate=30:
+                scale=lin:
+                colors=white,
               format=rgba,
-              colorkey=black:0.10:0.05
+              colorkey=0x000000:0.02:0.0,
+              format=yuva444p
               [wave];
 
               [0:v]
               drawbox=
-              x=${BOX_X}:
-              y=${BOX_Y}:
-              w=${BOX_W}:
-              h=${BOX_H}:
-              color=black@0.55:
-              t=fill:
-              enable='gte(t,13)'
+                x=${BOX_X}:
+                y=${BOX_Y}:
+                w=${BOX_W}:
+                h=${BOX_H}:
+                color=black@0.55:
+                t=fill:
+                enable='gte(t,13)'
               [base];
 
               [base][wave]
               overlay=
-              x=${X}:
-              y=${Y}:
-              enable='gte(t,13)'
+                x=${X}:
+                y=${Y}:
+                eof_action=pass:
+                enable='gte(t,13)'
               [v]
             " \
             -map "[v]" \
@@ -927,7 +932,12 @@ jobs:
           fi
 
           echo ""
-          echo "Final video created:"
+          echo "=========================================="
+          echo "Waveform added successfully"
+          echo "=========================================="
+
+          echo ""
+          echo "Final video:"
           ls -lh output_final.mp4
 
           ffprobe \
@@ -1125,6 +1135,7 @@ jobs:
                   )
 
           # Save result for next step
+
           with open("upload_result.json", "w") as result:
               json.dump(
                   {
