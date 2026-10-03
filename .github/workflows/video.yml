@@ -23,6 +23,11 @@ on:
         required: true
         type: string
 
+      waveform_position:
+        description: 'Waveform position 1-8'
+        required: true
+        type: string
+
 
 jobs:
   process-video:
@@ -509,14 +514,123 @@ jobs:
 
       # ==========================================
       # Add waveform starting at 13 seconds
+      # Position and size selected by n8n
       # ==========================================
 
       - name: Add waveform starting at 13s
 
+        env:
+          WAVEFORM_POSITION: ${{ github.event.inputs.waveform_position }}
+
         run: |
           set -e
 
+          echo ""
+          echo "=========================================="
+          echo "Selecting waveform position"
+          echo "=========================================="
+
+          echo "Received waveform position: $WAVEFORM_POSITION"
+
+
+          # ==========================================
+          # Select waveform coordinates
+          # ==========================================
+
+          case "$WAVEFORM_POSITION" in
+
+            1)
+              WAVE_X=1065
+              WAVE_Y=533
+              WAVE_W=776
+              WAVE_H=13
+              ;;
+
+            2)
+              WAVE_X=332
+              WAVE_Y=112
+              WAVE_W=1256
+              WAVE_H=13
+              ;;
+
+            3)
+              WAVE_X=179
+              WAVE_Y=654
+              WAVE_W=1563
+              WAVE_H=13
+              ;;
+
+            4)
+              WAVE_X=90
+              WAVE_Y=534
+              WAVE_W=614
+              WAVE_H=13
+              ;;
+
+            5)
+              WAVE_X=309
+              WAVE_Y=346
+              WAVE_W=1302
+              WAVE_H=13
+              ;;
+
+            6)
+              WAVE_X=176
+              WAVE_Y=732
+              WAVE_W=1569
+              WAVE_H=13
+              ;;
+
+            7)
+              WAVE_X=277
+              WAVE_Y=230
+              WAVE_W=1132
+              WAVE_H=13
+              ;;
+
+            8)
+              WAVE_X=444
+              WAVE_Y=850
+              WAVE_W=1353
+              WAVE_H=13
+              ;;
+
+            *)
+              echo ""
+              echo "=========================================="
+              echo "ERROR"
+              echo "=========================================="
+
+              echo "Invalid waveform position: $WAVEFORM_POSITION"
+
+              echo "Allowed values: 1, 2, 3, 4, 5, 6, 7, 8"
+
+              exit 1
+              ;;
+
+          esac
+
+
+          echo ""
+          echo "=========================================="
+          echo "Selected waveform settings"
+          echo "=========================================="
+
+          echo "Position: $WAVEFORM_POSITION"
+          echo "X: $WAVE_X"
+          echo "Y: $WAVE_Y"
+          echo "Width: $WAVE_W"
+          echo "Height: $WAVE_H"
+
+          echo "=========================================="
+
+
           SUCCESS=0
+
+
+          # ==========================================
+          # Process waveform
+          # ==========================================
 
           for i in 1 2 3 4 5; do
 
@@ -527,12 +641,13 @@ jobs:
 
             rm -f output_final.mp4
 
+
             if ffmpeg \
               -y \
               -i output_cropped.mp4 \
               -filter_complex "\
-              [0:a]compand,showwaves=s=629x8:colors=white@1:draw=full:mode=p2p,format=yuva420p[wave]; \
-              [0:v][wave]overlay=x=541:y=616:format=auto:enable='gte(t,13)',format=yuv420p[outv]" \
+              [0:a]compand,showwaves=s=${WAVE_W}x${WAVE_H}:colors=white@1:draw=full:mode=p2p,format=yuva420p[wave]; \
+              [0:v][wave]overlay=x=${WAVE_X}:y=${WAVE_Y}:format=auto:enable='gte(t,13)',format=yuv420p[outv]" \
               -map "[outv]" \
               -map 0:a \
               -c:v libx264 \
@@ -558,6 +673,7 @@ jobs:
               echo "FFmpeg waveform processing failed."
 
             fi
+
 
             if [ "$i" -lt 5 ]; then
               echo "Waiting 5 seconds before retry..."
@@ -597,8 +713,7 @@ jobs:
           VIDEO_NAME: ${{ github.event.inputs.video_name }}
 
           # ==========================================
-          # IMPORTANT:
-          # Webhook URL now comes from n8n
+          # Webhook URL comes from n8n
           # ==========================================
 
           N8N_WEBHOOK_URL: ${{ github.event.inputs.webhook_url }}
@@ -626,7 +741,6 @@ jobs:
           folder_id = os.environ["DRIVE_FOLDER_ID"]
           video_name = os.environ["VIDEO_NAME"]
 
-          # Webhook URL sent dynamically by n8n
           webhook_url = os.environ["N8N_WEBHOOK_URL"]
 
 
