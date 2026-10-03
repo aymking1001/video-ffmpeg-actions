@@ -186,6 +186,11 @@ jobs:
 
       # ============================================================
       # Create montage
+      #
+      # Structure:
+      #   [0s ─── 9s]   intro
+      #   [9s ─── 10s]  fade transition
+      #   [10s ─ 15s]   image (static, will be extended later)
       # ============================================================
       - name: Create montage
         shell: bash
@@ -209,6 +214,8 @@ jobs:
               [intro];
 
               [1:v]
+              trim=duration=5,
+              setpts=PTS-STARTPTS,
               scale=1920:1080:force_original_aspect_ratio=decrease,
               pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
               fps=30,
@@ -223,12 +230,12 @@ jobs:
               [video]
             " \
             -map "[video]" \
-            -t 5 \
             -an \
             -c:v libx264 \
             -preset medium \
             -crf 18 \
             -pix_fmt yuv420p \
+            -r 30 \
             montage.mp4
 
           echo "Montage created:"
@@ -239,7 +246,7 @@ jobs:
             montage.mp4
 
       # ============================================================
-      # Add audio
+      # Add audio (extend video to match audio duration)
       # ============================================================
       - name: Add audio
         shell: bash
@@ -264,6 +271,9 @@ jobs:
 
           PROCESS_DURATION="$AUDIO_DURATION"
 
+          # We need to extend the LAST FRAME (image) to fill the audio duration.
+          # We use tpad with stop_mode=clone to hold the final frame.
+
           rm -f montage_audio.mp4
 
           ffmpeg \
@@ -283,6 +293,7 @@ jobs:
             -preset medium \
             -crf 18 \
             -pix_fmt yuv420p \
+            -r 30 \
             -c:a aac \
             -b:a 192k \
             -shortest \
@@ -290,14 +301,17 @@ jobs:
 
           echo "Audio montage created."
 
+          ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            montage_audio.mp4
+
       # ============================================================
       # Add waveform
       #
-      # Notes:
-      # - We use a fully transparent canvas (color=black@0.0) of
-      #   1920x1080, then overlay the white waveform on top of it,
-      #   then overlay the combined layer on the base video.
-      # - This avoids colorkey issues and works reliably.
+      # Waveform appears only AFTER the intro ends (after t=10s).
+      # It stays visible until the end of the video.
       # ============================================================
       - name: Add waveform
         shell: bash
@@ -373,7 +387,7 @@ jobs:
             -v error \
             -show_entries format=duration \
             -of default=noprint_wrappers=1:nokey=1 \
-            audio.ogg)
+            montage_audio.mp4)
 
           echo "=========================================="
           echo "Waveform configuration"
@@ -382,8 +396,8 @@ jobs:
           echo "Y: $Y"
           echo "W: $W"
           echo "H: $H"
-          echo "Audio duration: $PROCESS_DURATION"
-          echo "Waveform starts: 13 seconds"
+          echo "Video duration: $PROCESS_DURATION"
+          echo "Waveform appears after: 10 seconds"
           echo "=========================================="
 
           rm -f output_final.mp4
@@ -428,7 +442,7 @@ jobs:
                 h=${BOX_H}:
                 color=black@0.55:
                 t=fill:
-                enable='gte(t,13)'
+                enable='gte(t,10)'
               [base];
 
               [base][wavevideo]
@@ -437,7 +451,7 @@ jobs:
                 y=0:
                 eof_action=pass:
                 repeatlast=0:
-                enable='gte(t,13)'
+                enable='gte(t,10)'
               [v];
 
             " \
