@@ -584,10 +584,6 @@ jobs:
 
       # ==========================================================
       # CREATE MONTAGE
-      #
-      # IMPORTANT:
-      # fps=30 + settb=1/30 are intentionally added to BOTH
-      # streams to fix the xfade timebase error from the log.
       # ==========================================================
 
       - name: Create montage
@@ -612,6 +608,7 @@ jobs:
               -y \
               -i intro.mp4 \
               -loop 1 \
+              -framerate 30 \
               -i image.png \
               -i audio.ogg \
               -filter_complex "
@@ -620,9 +617,9 @@ jobs:
                 pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
                 setsar=1,
                 fps=30,
-                settb=1/30,
                 trim=duration=9,
-                setpts=PTS-STARTPTS
+                setpts=PTS-STARTPTS,
+                format=yuv420p
                 [intro];
 
                 [1:v]
@@ -630,15 +627,14 @@ jobs:
                 pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
                 setsar=1,
                 fps=30,
-                settb=1/30,
-                setpts=PTS-STARTPTS
+                setpts=PTS-STARTPTS,
+                format=yuv420p
                 [image];
 
                 [intro][image]
-                xfade=
-                transition=fade:
-                duration=1:
-                offset=8
+                xfade=transition=fade:duration=1:offset=8,
+                fps=30,
+                format=yuv420p
                 [video]
               " \
               -map "[video]" \
@@ -648,6 +644,7 @@ jobs:
               -crf 18 \
               -pix_fmt yuv420p \
               -r 30 \
+              -fps_mode cfr \
               -c:a aac \
               -b:a 192k \
               -shortest \
@@ -686,7 +683,7 @@ jobs:
           ffprobe \
             -v error \
             -show_entries format=duration \
-            -show_entries stream=index,codec_name,width,height \
+            -show_entries stream=index,codec_name,width,height,r_frame_rate \
             -of default=noprint_wrappers=1 \
             montage.mp4
 
