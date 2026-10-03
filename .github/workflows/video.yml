@@ -836,7 +836,6 @@ jobs:
               ;;
           esac
 
-          echo "Waveform:"
           echo "X=$X"
           echo "Y=$Y"
           echo "W=$W"
@@ -860,22 +859,30 @@ jobs:
             -of default=noprint_wrappers=1:nokey=1 \
             montage.mp4)
 
-          echo "Montage duration: $MONTAGE_DURATION seconds"
+          echo "Montage duration: $MONTAGE_DURATION"
 
           if [ -z "$MONTAGE_DURATION" ]; then
             echo "ERROR: Could not detect montage duration."
             exit 1
           fi
 
-          PROCESS_DURATION=$(awk "BEGIN {print $MONTAGE_DURATION + 0.5}")
+          # ==========================================================
+          # IMPORTANT
+          #
+          # Waveform should exist for the entire montage.
+          # We do NOT start the waveform audio at second 13.
+          #
+          # The overlay itself starts at second 13.
+          # ==========================================================
 
-          echo "Processing duration: $PROCESS_DURATION seconds"
+          PROCESS_DURATION="$MONTAGE_DURATION"
 
           rm -f output_final.mp4
 
-          # ==========================================================
-          # Create waveform
-          # ==========================================================
+          echo ""
+          echo "=========================================="
+          echo "Rendering waveform overlay"
+          echo "=========================================="
 
           ffmpeg \
             -y \
@@ -889,11 +896,9 @@ jobs:
                 s=${W}x${H}:
                 mode=cline:
                 rate=30:
-                scale=lin:
+                scale=sqrt:
                 colors=white,
-              format=rgba,
-              colorkey=0x000000:0.02:0.0,
-              format=yuva444p
+                format=rgba
               [wave];
 
               [0:v]
@@ -911,7 +916,9 @@ jobs:
               overlay=
                 x=${X}:
                 y=${Y}:
+                format=auto:
                 eof_action=pass:
+                repeatlast=0:
                 enable='gte(t,13)'
               [v]
             " \
@@ -933,16 +940,18 @@ jobs:
 
           echo ""
           echo "=========================================="
-          echo "Waveform added successfully"
+          echo "WAVEFORM RENDER COMPLETE"
           echo "=========================================="
 
-          echo ""
-          echo "Final video:"
           ls -lh output_final.mp4
+
+          echo ""
+          echo "Final video information:"
 
           ffprobe \
             -v error \
             -show_entries format=duration,size \
+            -show_entries stream=index,codec_name,width,height,r_frame_rate \
             -of default=noprint_wrappers=1 \
             output_final.mp4
 
