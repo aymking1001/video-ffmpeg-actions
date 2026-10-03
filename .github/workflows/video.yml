@@ -371,6 +371,16 @@ jobs:
 
           "$FFMPEG_DIR/ffmpeg" -version
 
+          echo ""
+          echo "Checking FFprobe..."
+
+          if [ ! -x "$FFMPEG_DIR/ffprobe" ]; then
+            echo "ERROR: ffprobe was not installed."
+            exit 1
+          fi
+
+          "$FFMPEG_DIR/ffprobe" -version
+
 
       # ==========================================
       # Download video
@@ -517,6 +527,9 @@ jobs:
       #
       # White transparent rounded rectangle
       # Black waveform
+      #
+      # Video duration is detected automatically.
+      # No fixed duration is used.
       # ==========================================
 
       - name: Add waveform starting at 13s
@@ -533,6 +546,32 @@ jobs:
           echo "=========================================="
 
           echo "Received waveform position: $WAVEFORM_POSITION"
+
+
+          # ==========================================
+          # Get exact video duration automatically
+          # ==========================================
+
+          VIDEO_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output_cropped.mp4)
+
+          if [ -z "$VIDEO_DURATION" ]; then
+            echo ""
+            echo "ERROR: Could not detect video duration."
+            exit 1
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "Detected video duration"
+          echo "=========================================="
+
+          echo "Video duration: ${VIDEO_DURATION} seconds"
+
+          echo "=========================================="
 
 
           # ==========================================
@@ -617,22 +656,17 @@ jobs:
           # Rectangle settings
           # ==========================================
 
-          # Extra space around the waveform
           PADDING_X=18
           PADDING_Y=16
 
-          # Rounded rectangle size
           BOX_W=$((WAVE_W + PADDING_X * 2))
           BOX_H=$((WAVE_H + PADDING_Y * 2))
 
-          # Rectangle position
           BOX_X=$((WAVE_X - PADDING_X))
           BOX_Y=$((WAVE_Y - PADDING_Y))
 
-          # Rounded corner radius
           RADIUS=12
 
-          # White transparency
           # 0.25 = 25% opacity
           BOX_ALPHA="0.25"
 
@@ -656,6 +690,10 @@ jobs:
           echo "Rectangle Height: $BOX_H"
           echo "Corner Radius: $RADIUS"
           echo "Rectangle Opacity: $BOX_ALPHA"
+
+          echo ""
+          echo "Final output duration will be:"
+          echo "${VIDEO_DURATION} seconds"
 
           echo "=========================================="
 
@@ -682,7 +720,7 @@ jobs:
               -y \
               -i output_cropped.mp4 \
               -filter_complex "
-              [0:a]compand,showwaves=s=${WAVE_W}x${WAVE_H}:colors=black@1:draw=full:mode=p2p,format=rgba[wave];
+              [0:a]compand,showwaves=s=${WAVE_W}x${WAVE_H}:colors=black@1:draw=full:mode=p2p,format=rgba,setpts=PTS-STARTPTS[wave];
 
               color=c=white@0:s=${BOX_W}x${BOX_H}:r=25,format=rgba,
               geq=
@@ -717,6 +755,7 @@ jobs:
               -map 0:a \
               -c:v libx264 \
               -c:a copy \
+              -t "$VIDEO_DURATION" \
               output_final.mp4; then
 
               if [ -s output_final.mp4 ]; then
@@ -758,6 +797,23 @@ jobs:
 
           fi
 
+
+          echo ""
+          echo "=========================================="
+          echo "Checking final video duration"
+          echo "=========================================="
+
+          FINAL_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            output_final.mp4)
+
+          echo "Input duration:  ${VIDEO_DURATION} seconds"
+          echo "Output duration: ${FINAL_DURATION} seconds"
+
+          echo ""
+          echo "Final video:"
 
           ls -lh output_final.mp4
 
