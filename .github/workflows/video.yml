@@ -1,3 +1,4 @@
+```yaml
 name: Video Processing
 
 on:
@@ -190,7 +191,7 @@ jobs:
       # Structure:
       #   [0s ─── 9s]   intro
       #   [9s ─── 10s]  fade transition
-      #   [10s ─ 15s]   image (static, will be extended later)
+      #   [10s ─ 15s]   image
       # ============================================================
       - name: Create montage
         shell: bash
@@ -239,6 +240,7 @@ jobs:
             montage.mp4
 
           echo "Montage created:"
+
           ffprobe \
             -v error \
             -show_entries format=duration \
@@ -246,7 +248,9 @@ jobs:
             montage.mp4
 
       # ============================================================
-      # Add audio (extend video to match audio duration)
+      # Add audio
+      #
+      # Extend the final image frame to match audio duration.
       # ============================================================
       - name: Add audio
         shell: bash
@@ -270,9 +274,6 @@ jobs:
           echo "Video duration: $VIDEO_DURATION"
 
           PROCESS_DURATION="$AUDIO_DURATION"
-
-          # We need to extend the LAST FRAME (image) to fill the audio duration.
-          # We use tpad with stop_mode=clone to hold the final frame.
 
           rm -f montage_audio.mp4
 
@@ -310,8 +311,11 @@ jobs:
       # ============================================================
       # Add waveform
       #
-      # Waveform appears only AFTER the intro ends (after t=10s).
-      # It stays visible until the end of the video.
+      # Waveform:
+      #   - BLACK
+      #   - WHITE background
+      #   - Appears after 10 seconds
+      #   - Remains until the end
       # ============================================================
       - name: Add waveform
         shell: bash
@@ -398,6 +402,8 @@ jobs:
           echo "H: $H"
           echo "Video duration: $PROCESS_DURATION"
           echo "Waveform appears after: 10 seconds"
+          echo "Waveform color: BLACK"
+          echo "Background color: WHITE"
           echo "=========================================="
 
           rm -f output_final.mp4
@@ -421,7 +427,7 @@ jobs:
                 mode=cline:
                 rate=30:
                 scale=sqrt:
-                colors=white:
+                colors=black:
                 draw=full,
               format=rgba
               [wave];
@@ -440,7 +446,7 @@ jobs:
                 y=${BOX_Y}:
                 w=${BOX_W}:
                 h=${BOX_H}:
-                color=black@0.55:
+                color=white@0.55:
                 t=fill:
                 enable='gte(t,10)'
               [base];
@@ -472,6 +478,7 @@ jobs:
 
           echo ""
           echo "Final video duration:"
+
           ffprobe \
             -v error \
             -show_entries format=duration \
@@ -647,3 +654,4 @@ jobs:
 
           response.raise_for_status()
           PY
+```
