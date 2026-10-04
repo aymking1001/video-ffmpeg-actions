@@ -184,13 +184,18 @@ jobs:
             -of default=noprint_wrappers=1 \
             audio.ogg || true
 
+
       # ============================================================
       # Create montage
       #
+      # The Intro duration is detected automatically using ffprobe.
+      #
       # Structure:
-      #   [0s ─── 9s]   intro
-      #   [9s ─── 10s]  fade transition
-      #   [10s ─ 15s]   image
+      #   [0s ───────── Intro duration - 1s]   Intro
+      #   [Intro duration - 1s ── Intro duration] Fade
+      #   [Intro duration ───────────────]       Image
+      #
+      # No hard-coded Intro duration.
       # ============================================================
       - name: Create montage
         shell: bash
@@ -199,14 +204,52 @@ jobs:
 
           rm -f montage.mp4
 
+          # ----------------------------------------------------------
+          # Detect the real Intro duration
+          # ----------------------------------------------------------
+          INTRO_DURATION=$(ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -of default=noprint_wrappers=1:nokey=1 \
+            intro.mp4)
+
+          echo "Detected Intro duration: ${INTRO_DURATION} seconds"
+
+          # ----------------------------------------------------------
+          # Validate duration
+          # ----------------------------------------------------------
+          if [ -z "$INTRO_DURATION" ]; then
+            echo "ERROR: Could not determine Intro duration."
+            exit 1
+          fi
+
+          if ! awk "BEGIN {exit !($INTRO_DURATION > 1)}"; then
+            echo "ERROR: Intro must be longer than 1 second."
+            exit 1
+          fi
+
+          # ----------------------------------------------------------
+          # Fade duration
+          # ----------------------------------------------------------
+          FADE_DURATION=1
+
+          # Fade starts one second before the Intro ends.
+          FADE_OFFSET=$(awk "BEGIN {printf \"%.6f\", $INTRO_DURATION - $FADE_DURATION}")
+
+          echo "Intro duration : ${INTRO_DURATION} seconds"
+          echo "Fade duration  : ${FADE_DURATION} second"
+          echo "Fade starts at : ${FADE_OFFSET} seconds"
+          echo "Image starts at: ${INTRO_DURATION} seconds"
+
+          # ----------------------------------------------------------
+          # Create Intro + Image montage
+          # ----------------------------------------------------------
           ffmpeg \
             -y \
             -i intro.mp4 \
             -loop 1 -i image.png \
             -filter_complex "
               [0:v]
-              trim=duration=9,
-              setpts=PTS-STARTPTS,
               scale=1920:1080:force_original_aspect_ratio=decrease,
               pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
               fps=30,
@@ -214,8 +257,6 @@ jobs:
               [intro];
 
               [1:v]
-              trim=duration=5,
-              setpts=PTS-STARTPTS,
               scale=1920:1080:force_original_aspect_ratio=decrease,
               pad=1920:1080:(ow-iw)/2:(oh-ih)/2,
               fps=30,
@@ -225,8 +266,8 @@ jobs:
               [intro][image]
               xfade=
                 transition=fade:
-                duration=1:
-                offset=8
+                duration=${FADE_DURATION}:
+                offset=${FADE_OFFSET}
               [video]
             " \
             -map "[video]" \
@@ -236,15 +277,19 @@ jobs:
             -crf 18 \
             -pix_fmt yuv420p \
             -r 30 \
+            -t "${INTRO_DURATION}" \
             montage.mp4
 
-          echo "Montage created:"
+          echo ""
+          echo "Montage created."
 
+          echo "Actual montage duration:"
           ffprobe \
             -v error \
             -show_entries format=duration \
             -of default=noprint_wrappers=1:nokey=1 \
             montage.mp4
+
 
       # ============================================================
       # Add audio
