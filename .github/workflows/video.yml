@@ -1,4 +1,3 @@
-```yaml
 name: Video Processing
 
 on:
@@ -654,4 +653,3 @@ jobs:
 
           response.raise_for_status()
           PY
-```
